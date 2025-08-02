@@ -1,0 +1,133 @@
+/* Global Styles */
+@import '~@angular/material/prebuilt-themes/indigo-pink.css';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Roboto', sans-serif;
+  background-color: #f5f5f5;
+}
+
+.container-fluid {
+  padding: 0;
+}
+
+/* Custom Material Design overrides */
+.mat-card {
+  border-radius: 12px !important;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1) !important;
+}
+
+.mat-button, .mat-raised-button {
+  border-radius: 8px !important;
+  text-transform: none !important;
+  font-weight: 500 !important;
+}
+
+.mat-form-field {
+  width: 100%;
+}
+
+/* Camera styles */
+.camera-container {
+  position: relative;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.camera-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.face-detection-frame {
+  position: absolute;
+  border: 3px solid #4caf50;
+  border-radius: 4px;
+  pointer-events: none;
+  background: rgba(76, 175, 80, 0.1);
+}
+
+/* Notification styles */
+.notification-card {
+  margin-bottom: 1rem;
+  border-left: 4px solid #2196f3;
+}
+
+.notification-card.success {
+  border-left-color: #4caf50;
+}
+
+.notification-card.warning {
+  border-left-color: #ff9800;
+}
+
+.notification-card.error {
+  border-left-color: #f44336;
+}
+
+/* Loading animations */
+.loading-spinner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .container {
+    padding: 0.5rem;
+  }
+  
+  .mat-card {
+    margin: 0.5rem 0;
+  }
+}
+
+/* Success/Error messages */
+.alert {
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+/* Custom button styles */
+.btn-capture {
+  background: linear-gradient(45deg, #2196f3, #21cbf3);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 24px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.btn-capture:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);
+}
+
+.btn-register {
+  background: linear-gradient(45deg, #4caf50, #45a049);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 24px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.btn-register:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.4);
+}

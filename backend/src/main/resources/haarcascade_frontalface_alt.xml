@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<!--
+    This is a simplified Haar cascade file for demonstration purposes.
+    In a production environment, you should use the full OpenCV Haar cascade files
+    available from: https://github.com/opencv/opencv/tree/master/data/haarcascades
+-->
+<opencv_storage>
+<haarcascade_frontalface_alt type_id="opencv-haar-classifier">
+  <size>24 24</size>
+  <stages>
+    <_>
+      <!-- Stage 0 -->
+      <trees>
+        <_>
+          <!-- Tree 0 -->
+          <_>
+            <feature>
+              <rects>
+                <_>3 7 18 4 -1</_>
+                <_>9 7 6 4 3</_></rects>
+            </feature>
+            <threshold>-0.0337941907346249</threshold>
+            <left_val>0.0747928470373154</left_val>
+            <right_val>-0.7941663265228271</right_val></_></_></trees>
+      <stage_threshold>-0.7941663265228271</stage_threshold></_>
+  </stages>
+  <features>
+    <_>
+      <rects>
+        <_>3 7 18 4 -1</_>
+        <_>9 7 6 4 3</_></rects></_></features>
+</haarcascade_frontalface_alt>
+</opencv_storage>
