@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:13
+    container_name: face_recognition_db
+    environment:
+      POSTGRES_DB: face_recognition
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - face_recognition_network
+
+  # Spring Boot Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: face_recognition_backend
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: face_recognition
+      DB_USERNAME: postgres
+      DB_PASSWORD: password
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: 587
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:-your-secret-key-here-make-it-long-and-secure}
+      JWT_EXPIRATION: 86400000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    networks:
+      - face_recognition_network
+    volumes:
+      - ./backend/src/main/resources/models:/app/models
+
+  # Angular Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: face_recognition_frontend
+    ports:
+      - "4200:80"
+    depends_on:
+      - backend
+    networks:
+      - face_recognition_network
+
+volumes:
+  postgres_data:
+
+networks:
+  face_recognition_network:
+    driver: bridge
