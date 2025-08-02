@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: face-recognition-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: facerecognition123
+      MYSQL_DATABASE: face_recognition_db
+      MYSQL_USER: faceuser
+      MYSQL_PASSWORD: facepass123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/sql:/docker-entrypoint-initdb.d
+    networks:
+      - face-recognition-network
+
+  # Spring Boot Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: face-recognition-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/face_recognition_db?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: faceuser
+      SPRING_DATASOURCE_PASSWORD: facepass123
+      SPRING_MAIL_USERNAME: ${MAIL_USERNAME:-your-email@gmail.com}
+      SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD:-your-app-password}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-your-account-sid}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-your-auth-token}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-your-twilio-number}
+    depends_on:
+      - mysql
+    volumes:
+      - face_uploads:/app/uploads
+    networks:
+      - face-recognition-network
+
+  # Angular Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: face-recognition-frontend
+    restart: unless-stopped
+    ports:
+      - "4200:80"
+    depends_on:
+      - backend
+    networks:
+      - face-recognition-network
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: face-recognition-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - face-recognition-network
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  face_uploads:
+    driver: local
+
+networks:
+  face-recognition-network:
+    driver: bridge
