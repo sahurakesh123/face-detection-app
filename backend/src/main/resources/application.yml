@@ -1,0 +1,67 @@
+spring:
+  application:
+    name: face-recognition-backend
+  
+  datasource:
+    url: jdbc:postgresql://localhost:5432/face_recognition_db
+    username: postgres
+    password: password
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: your-email@gmail.com
+    password: your-app-password
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+  
+  security:
+    user:
+      name: admin
+      password: admin123
+
+server:
+  port: 8080
+  servlet:
+    context-path: /api
+
+# JWT Configuration
+jwt:
+  secret: your-secret-key-here-make-it-long-and-secure
+  expiration: 86400000 # 24 hours
+
+# Face Recognition Configuration
+face:
+  recognition:
+    threshold: 0.6
+    model-path: /models/face_recognition_model.dat
+    cascade-path: /models/haarcascade_frontalface_default.xml
+
+# Logging
+logging:
+  level:
+    com.facerecognition: DEBUG
+    org.springframework.security: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+# CORS Configuration
+cors:
+  allowed-origins: http://localhost:4200
+  allowed-methods: GET,POST,PUT,DELETE,OPTIONS
+  allowed-headers: "*"
+  allow-credentials: true
