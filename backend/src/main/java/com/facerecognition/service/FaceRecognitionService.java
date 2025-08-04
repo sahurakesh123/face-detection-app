@@ -3,6 +3,7 @@ package com.facerecognition.service;
 import com.facerecognition.model.FaceData;
 import com.facerecognition.model.Person;
 import com.facerecognition.repository.FaceDataRepository;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import nu.pattern.OpenCV;
@@ -14,7 +15,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.annotation.PostConstruct;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
