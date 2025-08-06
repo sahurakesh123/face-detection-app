@@ -1,5 +1,6 @@
 package com.facerecognition.model;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -20,6 +21,7 @@ public class FaceData {
     
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "person_id", nullable = false)
+    @JsonBackReference("person-facedata")
     private Person person;
     
     @Column(name = "image_path", nullable = false)

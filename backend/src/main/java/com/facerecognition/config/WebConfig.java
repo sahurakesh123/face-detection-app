@@ -23,7 +23,7 @@ public class WebConfig implements WebMvcConfigurer {
     
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        registry.addMapping("/**")
+        registry.addMapping("/api/**")
             .allowedOrigins(allowedOrigins.split(","))
             .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
             .allowedHeaders("*")
@@ -33,12 +33,23 @@ public class WebConfig implements WebMvcConfigurer {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-            .cors().and()
-            .csrf().disable()
-            .authorizeHttpRequests(authz -> authz
-                .requestMatchers("/api/**").permitAll()
-                .anyRequest().authenticated()
-            );
+                .cors().and()
+                .csrf().disable()
+                .authorizeHttpRequests(authz -> authz
+                        .requestMatchers("persons/{id}/face-data",
+                                "/face/detections/camera/**",
+                                "/face/detections/person/{personId}",
+                                "/face/detections/camera/**",
+                                "/face/detections/camera/{cameraId}",
+                                "/api/persons",
+                                "/api/persons/search",
+                                "/api/persons/{id}",
+                                "/persons",
+                                "/face/detections/person/**", "/api/face/detections/recent", "/api/face/detect",
+                                "/persons/register", "/persons/login").permitAll()
+                        .requestMatchers("/health/**", "/api/health/**").permitAll()
+                        .anyRequest().authenticated()
+                );
         
         return http.build();
     }

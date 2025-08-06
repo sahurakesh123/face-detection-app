@@ -1,5 +1,8 @@
 package com.facerecognition.controller;
 
+import com.facerecognition.dto.PersonDTO;
+import com.facerecognition.dto.PersonSummaryDTO;
+import com.facerecognition.mapper.PersonMapper;
 import com.facerecognition.model.Person;
 import com.facerecognition.service.PersonService;
 import jakarta.validation.Valid;
@@ -20,8 +23,9 @@ import java.util.Map;
 @Slf4j
 @CrossOrigin(origins = "${app.cors.allowed-origins}")
 public class PersonController {
-    
+
     private final PersonService personService;
+    private final PersonMapper personMapper;
     
     @PostMapping("/register")
     public ResponseEntity<?> registerPerson(
@@ -42,10 +46,12 @@ public class PersonController {
             
             Person registeredPerson = personService.registerPerson(person, faceImage);
             
+            PersonSummaryDTO personDTO = personMapper.toPersonSummaryDTO(registeredPerson);
+
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Person registered successfully",
-                "person", registeredPerson
+                "person", personDTO
             ));
             
         } catch (IllegalArgumentException e) {
@@ -63,28 +69,30 @@ public class PersonController {
     }
     
     @GetMapping
-    public ResponseEntity<List<Person>> getAllPersons() {
+    public ResponseEntity<List<PersonSummaryDTO>> getAllPersons() {
         List<Person> persons = personService.getAllActivePersons();
-        return ResponseEntity.ok(persons);
+        List<PersonSummaryDTO> personDTOs = personMapper.toPersonSummaryDTOList(persons);
+        return ResponseEntity.ok(personDTOs);
     }
     
     @GetMapping("/{id}")
     public ResponseEntity<?> getPersonById(@PathVariable Long id) {
         return personService.getPersonById(id)
-            .map(person -> ResponseEntity.ok(person))
+            .map(person -> ResponseEntity.ok(personMapper.toPersonDTO(person)))
             .orElse(ResponseEntity.notFound().build());
     }
     
     @GetMapping("/search")
-    public ResponseEntity<List<Person>> searchPersons(@RequestParam String name) {
+    public ResponseEntity<List<PersonSummaryDTO>> searchPersons(@RequestParam String name) {
         List<Person> persons = personService.searchPersonsByName(name);
-        return ResponseEntity.ok(persons);
+        List<PersonSummaryDTO> personDTOs = personMapper.toPersonSummaryDTOList(persons);
+        return ResponseEntity.ok(personDTOs);
     }
     
     @GetMapping("/email/{email}")
     public ResponseEntity<?> getPersonByEmail(@PathVariable String email) {
         return personService.getPersonByEmail(email)
-            .map(person -> ResponseEntity.ok(person))
+            .map(person -> ResponseEntity.ok(personMapper.toPersonSummaryDTO(person)))
             .orElse(ResponseEntity.notFound().build());
     }
     
@@ -92,10 +100,11 @@ public class PersonController {
     public ResponseEntity<?> updatePerson(@PathVariable Long id, @Valid @RequestBody Person person) {
         try {
             Person updatedPerson = personService.updatePerson(id, person);
+            PersonSummaryDTO personDTO = personMapper.toPersonSummaryDTO(updatedPerson);
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Person updated successfully",
-                "person", updatedPerson
+                "person", personDTO
             ));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of(

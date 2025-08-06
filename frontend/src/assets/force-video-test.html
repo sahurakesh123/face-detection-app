@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Force Video Rendering Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        video { 
+            border: 2px solid #333; 
+            margin: 10px; 
+            display: block;
+            background: #000;
+        }
+        canvas { border: 2px solid #666; margin: 10px; display: block; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        .info { background: #f0f0f0; padding: 10px; margin: 10px 0; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+    </style>
+</head>
+<body>
+    <h1>Force Video Rendering Test</h1>
+    
+    <button onclick="startCamera()">Start Camera</button>
+    <button onclick="forceCapture()" id="captureBtn" disabled>Force Capture</button>
+    <button onclick="testVideoCapture()" id="testBtn" disabled>Test Video Capture</button>
+    
+    <div id="status" class="info">Ready</div>
+    
+    <!-- Multiple video elements to test different approaches -->
+    <h3>Video Stream:</h3>
+    <video id="video" width="640" height="480" autoplay muted playsinline controls></video>
+    
+    <h3>Captured Image:</h3>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    
+    <script>
+        let stream = null;
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        
+        function updateStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = 'info ' + type;
+            console.log(message);
+        }
+        
+        async function startCamera() {
+            try {
+                updateStatus('Starting camera...', 'info');
+                
+                // Stop any existing stream
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                
+                // Try different constraints
+                const constraints = [
+                    { video: true }, // Let browser choose
+                    { video: { width: 320, height: 240 } },
+                    { video: { width: 640, height: 480 } },
+                    { video: { facingMode: 'user' } },
+                    { video: { facingMode: 'environment' } }
+                ];
+                
+                for (let constraint of constraints) {
+                    try {
+                        console.log('Trying constraint:', constraint);
+                        stream = await navigator.mediaDevices.getUserMedia(constraint);
+                        console.log('Success with constraint:', constraint);
+                        break;
+                    } catch (err) {
+                        console.log('Failed with constraint:', constraint, err.message);
+                    }
+                }
+                
+                if (!stream) {
+                    throw new Error('No camera constraints worked');
+                }
+                
+                console.log('Stream tracks:', stream.getTracks().map(track => ({
+                    kind: track.kind,
+                    label: track.label,
+                    enabled: track.enabled,
+                    readyState: track.readyState,
+                    settings: track.getSettings()
+                })));
+                
+                // Set video source
+                video.srcObject = stream;
+                
+                // Force video to load and play
+                video.load();
+                
+                // Wait for video events
+                await new Promise((resolve, reject) => {
+                    let resolved = false;
+                    let attempts = 0;
+                    
+                    const checkVideo = () => {
+                        attempts++;
+                        console.log(`Video check attempt ${attempts}:`, {
+                            videoWidth: video.videoWidth,
+                            videoHeight: video.videoHeight,
+                            readyState: video.readyState,
+                            currentTime: video.currentTime,
+                            paused: video.paused,
+                            ended: video.ended,
+                            networkState: video.networkState
+                        });
+                        
+                        if (video.videoWidth > 0 && video.videoHeight > 0 && video.readyState >= 2) {
+                            if (!resolved) {
+                                resolved = true;
+                                resolve();
+                            }
+                        } else if (attempts < 20) {
+                            setTimeout(checkVideo, 500);
+                        } else {
+                            if (!resolved) {
+                                resolved = true;
+                                reject(new Error('Video failed to load after 10 seconds'));
+                            }
+                        }
+                    };
+                    
+                    video.addEventListener('loadedmetadata', () => {
+                        console.log('loadedmetadata event fired');
+                        setTimeout(checkVideo, 100);
+                    });
+                    
+                    video.addEventListener('canplay', () => {
+                        console.log('canplay event fired');
+                        setTimeout(checkVideo, 100);
+                    });
+                    
+                    video.addEventListener('playing', () => {
+                        console.log('playing event fired');
+                        setTimeout(checkVideo, 100);
+                    });
+                    
+                    video.addEventListener('error', (error) => {
+                        console.error('Video error event:', error);
+                        if (!resolved) {
+                            resolved = true;
+                            reject(error);
+                        }
+                    });
+                    
+                    // Start checking immediately
+                    setTimeout(checkVideo, 100);
+                });
+                
+                // Force play
+                try {
+                    await video.play();
+                    console.log('Video play() successful');
+                } catch (playError) {
+                    console.error('Video play() failed:', playError);
+                }
+                
+                // Wait for video to stabilize
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                
+                const finalState = {
+                    videoWidth: video.videoWidth,
+                    videoHeight: video.videoHeight,
+                    readyState: video.readyState,
+                    currentTime: video.currentTime,
+                    paused: video.paused,
+                    ended: video.ended
+                };
+                
+                console.log('Final video state:', finalState);
+                
+                if (video.videoWidth > 0 && video.videoHeight > 0) {
+                    updateStatus(`Camera ready! Video: ${video.videoWidth}x${video.videoHeight}`, 'success');
+                    document.getElementById('captureBtn').disabled = false;
+                    document.getElementById('testBtn').disabled = false;
+                } else {
+                    updateStatus('Camera started but video has no dimensions', 'error');
+                }
+                
+            } catch (error) {
+                console.error('Camera error:', error);
+                updateStatus('Camera error: ' + error.message, 'error');
+            }
+        }
+        
+        function testVideoCapture() {
+            console.log('Testing if video element can be captured...');
+            
+            // Create a test pattern on canvas first
+            ctx.fillStyle = 'red';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'white';
+            ctx.font = '48px Arial';
+            ctx.fillText('TEST PATTERN', 50, 100);
+            
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    const sizeKB = Math.round(blob.size / 1024);
+                    console.log('Test pattern blob:', blob.size, 'bytes (', sizeKB, 'KB)');
+                    updateStatus(`Test pattern created: ${sizeKB}KB`, 'success');
+                } else {
+                    updateStatus('Failed to create test pattern', 'error');
+                }
+            }, 'image/jpeg', 0.9);
+        }
+        
+        function forceCapture() {
+            try {
+                updateStatus('Force capturing...', 'info');
+                
+                console.log('Video element properties:', {
+                    videoWidth: video.videoWidth,
+                    videoHeight: video.videoHeight,
+                    readyState: video.readyState,
+                    currentTime: video.currentTime,
+                    paused: video.paused,
+                    ended: video.ended,
+                    srcObject: !!video.srcObject,
+                    src: video.src,
+                    networkState: video.networkState,
+                    buffered: video.buffered.length,
+                    duration: video.duration
+                });
+                
+                if (!video.srcObject) {
+                    updateStatus('No video source!', 'error');
+                    return;
+                }
+                
+                // Force canvas size
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                
+                console.log('Canvas size set to:', canvas.width, 'x', canvas.height);
+                
+                // Clear with different color to detect if drawing works
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Try to draw video
+                try {
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    console.log('drawImage() completed without error');
+                } catch (drawError) {
+                    console.error('drawImage() failed:', drawError);
+                    updateStatus('drawImage failed: ' + drawError.message, 'error');
+                    return;
+                }
+                
+                // Check what we actually drew
+                const imageData = ctx.getImageData(0, 0, Math.min(100, canvas.width), Math.min(100, canvas.height));
+                const data = imageData.data;
+                
+                let redPixels = 0, greenPixels = 0, bluePixels = 0, blackPixels = 0, whitePixels = 0;
+                
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    
+                    if (r > 200 && g < 50 && b < 50) redPixels++;
+                    else if (r < 50 && g > 200 && b < 50) greenPixels++;
+                    else if (r < 50 && g < 50 && b > 200) bluePixels++;
+                    else if (r < 50 && g < 50 && b < 50) blackPixels++;
+                    else if (r > 200 && g > 200 && b > 200) whitePixels++;
+                }
+                
+                const totalPixels = data.length / 4;
+                console.log('Pixel analysis:', {
+                    totalPixels,
+                    redPixels,
+                    greenPixels,
+                    bluePixels,
+                    blackPixels,
+                    whitePixels,
+                    bluePercentage: (bluePixels / totalPixels * 100).toFixed(2) + '%'
+                });
+                
+                // If mostly blue, it means drawImage didn't work
+                if (bluePixels / totalPixels > 0.8) {
+                    updateStatus('Video not rendering - canvas is still blue background', 'error');
+                    return;
+                }
+                
+                // Convert to blob
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        const sizeKB = Math.round(blob.size / 1024);
+                        console.log('Force captured blob:', {
+                            size: blob.size,
+                            sizeKB: sizeKB,
+                            type: blob.type
+                        });
+                        
+                        if (blob.size > 5000) {
+                            updateStatus(`Force capture successful! Size: ${sizeKB}KB`, 'success');
+                        } else {
+                            updateStatus(`Force capture completed but small size: ${sizeKB}KB`, 'error');
+                        }
+                    } else {
+                        updateStatus('Failed to create blob from canvas', 'error');
+                    }
+                }, 'image/jpeg', 0.9);
+                
+            } catch (error) {
+                console.error('Force capture error:', error);
+                updateStatus('Force capture error: ' + error.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

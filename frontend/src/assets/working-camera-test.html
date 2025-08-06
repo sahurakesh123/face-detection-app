@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Working Camera Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        video { border: 2px solid #333; margin: 10px; display: block; }
+        canvas { border: 2px solid #666; margin: 10px; display: block; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        .info { background: #f0f0f0; padding: 10px; margin: 10px 0; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+    </style>
+</head>
+<body>
+    <h1>Working Camera Test</h1>
+    
+    <button onclick="startCamera()">Start Camera</button>
+    <button onclick="captureImage()" id="captureBtn" disabled>Capture Image</button>
+    <button onclick="sendToBackend()" id="sendBtn" disabled>Send to Backend</button>
+    
+    <div id="status" class="info">Ready</div>
+    
+    <!-- Video must be visible for proper rendering -->
+    <video id="video" width="640" height="480" autoplay muted playsinline></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    
+    <script>
+        let stream = null;
+        let capturedBlob = null;
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let ctx = canvas.getContext('2d');
+        
+        function updateStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = 'info ' + type;
+            console.log(message);
+        }
+        
+        async function startCamera() {
+            try {
+                updateStatus('Starting camera...', 'info');
+                
+                // Stop any existing stream
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                
+                // Request camera with specific constraints
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640, min: 320 },
+                        height: { ideal: 480, min: 240 },
+                        facingMode: 'user'
+                    }
+                });
+                
+                console.log('Stream obtained:', stream);
+                
+                // Set video source
+                video.srcObject = stream;
+                
+                // Wait for video to be ready
+                await new Promise((resolve, reject) => {
+                    let resolved = false;
+                    
+                    const onLoadedMetadata = () => {
+                        console.log('Video metadata loaded');
+                        if (!resolved) {
+                            resolved = true;
+                            resolve();
+                        }
+                    };
+                    
+                    const onCanPlay = () => {
+                        console.log('Video can play');
+                        if (!resolved) {
+                            resolved = true;
+                            resolve();
+                        }
+                    };
+                    
+                    const onPlaying = () => {
+                        console.log('Video is playing');
+                        if (!resolved) {
+                            resolved = true;
+                            resolve();
+                        }
+                    };
+                    
+                    const onError = (error) => {
+                        console.error('Video error:', error);
+                        if (!resolved) {
+                            resolved = true;
+                            reject(error);
+                        }
+                    };
+                    
+                    video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+                    video.addEventListener('canplay', onCanPlay, { once: true });
+                    video.addEventListener('playing', onPlaying, { once: true });
+                    video.addEventListener('error', onError, { once: true });
+                    
+                    // Timeout after 10 seconds
+                    setTimeout(() => {
+                        if (!resolved) {
+                            resolved = true;
+                            reject(new Error('Video loading timeout'));
+                        }
+                    }, 10000);
+                });
+                
+                // Ensure video is playing
+                await video.play();
+                
+                // Wait additional time for video to stabilize
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                console.log('Video ready:', {
+                    videoWidth: video.videoWidth,
+                    videoHeight: video.videoHeight,
+                    readyState: video.readyState,
+                    currentTime: video.currentTime,
+                    paused: video.paused
+                });
+                
+                updateStatus(`Camera ready! Video: ${video.videoWidth}x${video.videoHeight}`, 'success');
+                document.getElementById('captureBtn').disabled = false;
+                
+            } catch (error) {
+                console.error('Camera error:', error);
+                updateStatus('Camera error: ' + error.message, 'error');
+            }
+        }
+        
+        function captureImage() {
+            try {
+                updateStatus('Capturing image...', 'info');
+                
+                console.log('Video state before capture:', {
+                    videoWidth: video.videoWidth,
+                    videoHeight: video.videoHeight,
+                    readyState: video.readyState,
+                    currentTime: video.currentTime,
+                    paused: video.paused,
+                    ended: video.ended
+                });
+                
+                if (video.videoWidth === 0 || video.videoHeight === 0) {
+                    updateStatus('Video has no dimensions!', 'error');
+                    return;
+                }
+                
+                if (video.readyState < 2) {
+                    updateStatus('Video not ready for capture!', 'error');
+                    return;
+                }
+                
+                // Set canvas size to match video
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                
+                // Clear canvas with white background
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw video frame to canvas
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Check if we actually captured something
+                const imageData = ctx.getImageData(0, 0, Math.min(50, canvas.width), Math.min(50, canvas.height));
+                const data = imageData.data;
+                let nonWhitePixels = 0;
+                
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    if (r < 250 || g < 250 || b < 250) {
+                        nonWhitePixels++;
+                    }
+                }
+                
+                const totalPixels = data.length / 4;
+                const contentPercentage = (nonWhitePixels / totalPixels) * 100;
+                
+                console.log('Image content analysis:', {
+                    totalPixels,
+                    nonWhitePixels,
+                    contentPercentage: contentPercentage.toFixed(2) + '%'
+                });
+                
+                if (contentPercentage < 5) {
+                    updateStatus('Captured image appears to be empty/white!', 'error');
+                    return;
+                }
+                
+                // Convert to blob
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        capturedBlob = blob;
+                        const sizeKB = Math.round(blob.size / 1024);
+                        console.log('Captured blob:', {
+                            size: blob.size,
+                            sizeKB: sizeKB,
+                            type: blob.type
+                        });
+                        
+                        if (blob.size > 10000) {
+                            updateStatus(`Image captured successfully! Size: ${sizeKB}KB`, 'success');
+                            document.getElementById('sendBtn').disabled = false;
+                        } else {
+                            updateStatus(`Warning: Image is very small (${sizeKB}KB)`, 'error');
+                        }
+                    } else {
+                        updateStatus('Failed to create image blob!', 'error');
+                    }
+                }, 'image/jpeg', 0.9);
+                
+            } catch (error) {
+                console.error('Capture error:', error);
+                updateStatus('Capture error: ' + error.message, 'error');
+            }
+        }
+        
+        async function sendToBackend() {
+            if (!capturedBlob) {
+                updateStatus('No image captured', 'error');
+                return;
+            }
+            
+            try {
+                updateStatus('Sending to backend...', 'info');
+                
+                const formData = new FormData();
+                formData.append('image', capturedBlob, 'test-image.jpg');
+                formData.append('firstName', 'Test');
+                formData.append('lastName', 'User');
+                formData.append('email', 'test@example.com');
+                
+                const response = await fetch('http://localhost:8080/api/persons/register', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                console.log('Backend response:', result);
+                
+                if (response.ok) {
+                    updateStatus('Successfully sent to backend!', 'success');
+                } else {
+                    updateStatus('Backend error: ' + (result.message || 'Unknown error'), 'error');
+                }
+                
+            } catch (error) {
+                console.error('Send error:', error);
+                updateStatus('Send error: ' + error.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

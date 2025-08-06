@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Camera Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        video, canvas { border: 2px solid #333; margin: 10px; }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; }
+        .info { background: #f0f0f0; padding: 10px; margin: 10px 0; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+    </style>
+</head>
+<body>
+    <h1>Simple Camera Test</h1>
+    
+    <button onclick="startCamera()">Start Camera</button>
+    <button onclick="captureImage()" id="captureBtn" disabled>Capture Image</button>
+    <button onclick="sendToBackend()" id="sendBtn" disabled>Send to Backend</button>
+    
+    <div id="status" class="info">Ready</div>
+    
+    <video id="video" width="640" height="480" autoplay muted style="display:none;"></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+    
+    <script>
+        let stream = null;
+        let capturedBlob = null;
+        
+        async function startCamera() {
+            try {
+                document.getElementById('status').textContent = 'Starting camera...';
+                
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480 }
+                });
+                
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                
+                // Wait for video to be ready
+                video.onloadedmetadata = () => {
+                    console.log('Video loaded:', video.videoWidth, 'x', video.videoHeight);
+                    document.getElementById('status').textContent = 'Camera ready!';
+                    document.getElementById('status').className = 'info success';
+                    document.getElementById('captureBtn').disabled = false;
+                };
+                
+            } catch (error) {
+                console.error('Camera error:', error);
+                document.getElementById('status').textContent = 'Camera error: ' + error.message;
+                document.getElementById('status').className = 'info error';
+            }
+        }
+        
+        function captureImage() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            
+            console.log('Capturing image...');
+            console.log('Video state:', {
+                videoWidth: video.videoWidth,
+                videoHeight: video.videoHeight,
+                readyState: video.readyState,
+                currentTime: video.currentTime
+            });
+            
+            // Draw video to canvas
+            ctx.drawImage(video, 0, 0, 640, 480);
+            
+            // Convert to blob
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    capturedBlob = blob;
+                    const sizeKB = Math.round(blob.size / 1024);
+                    console.log('Captured blob:', blob.size, 'bytes (', sizeKB, 'KB)');
+                    
+                    document.getElementById('status').textContent = `Image captured: ${sizeKB}KB`;
+                    document.getElementById('status').className = blob.size > 10000 ? 'info success' : 'info error';
+                    document.getElementById('sendBtn').disabled = false;
+                } else {
+                    console.error('Failed to create blob');
+                    document.getElementById('status').textContent = 'Failed to capture image';
+                    document.getElementById('status').className = 'info error';
+                }
+            }, 'image/jpeg', 0.9);
+        }
+        
+        async function sendToBackend() {
+            if (!capturedBlob) {
+                alert('No image captured');
+                return;
+            }
+            
+            try {
+                document.getElementById('status').textContent = 'Sending to backend...';
+                
+                const formData = new FormData();
+                formData.append('image', capturedBlob, 'test-image.jpg');
+                formData.append('firstName', 'Test');
+                formData.append('lastName', 'User');
+                formData.append('email', 'test@example.com');
+                
+                const response = await fetch('http://localhost:8080/api/persons/register', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                console.log('Backend response:', result);
+                
+                if (response.ok) {
+                    document.getElementById('status').textContent = 'Successfully sent to backend!';
+                    document.getElementById('status').className = 'info success';
+                } else {
+                    document.getElementById('status').textContent = 'Backend error: ' + (result.message || 'Unknown error');
+                    document.getElementById('status').className = 'info error';
+                }
+                
+            } catch (error) {
+                console.error('Send error:', error);
+                document.getElementById('status').textContent = 'Send error: ' + error.message;
+                document.getElementById('status').className = 'info error';
+            }
+        }
+    </script>
+</body>
+</html>

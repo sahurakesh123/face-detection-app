@@ -23,17 +23,25 @@ public class DetectionService {
     private final SmsService smsService;
     
     @Transactional
-    public DetectionLog processFaceDetection(MultipartFile imageFile, Double latitude, Double longitude, 
+    public DetectionLog processFaceDetection(MultipartFile imageFile, Double latitude, Double longitude,
                                            String cameraId, String cameraType, String locationAddress) throws Exception {
-        
+
+        // Check if face recognition service is properly initialized
+        if (!faceRecognitionService.isInitialized()) {
+            String status = faceRecognitionService.getInitializationStatus();
+            log.error("Face recognition service not initialized: {}", status);
+            throw new IllegalStateException("Face recognition service is not properly initialized: " + status);
+        }
+
         // Validate image
         if (!faceRecognitionService.validateImage(imageFile)) {
             throw new IllegalArgumentException("Invalid image format");
         }
-        
+
         // Save detection image
         String imagePath = faceRecognitionService.saveImage(imageFile, "detection_" + System.currentTimeMillis());
-        
+        log.info("Detection image saved to: {}", imagePath);
+
         // Try to match face
         Person matchedPerson = faceRecognitionService.matchFace(imagePath, latitude, longitude);
         

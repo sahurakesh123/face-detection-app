@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        video {
+            border: 2px solid #333;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        canvas {
+            border: 2px solid #666;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .info {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Camera Capture Test</h1>
+        <p>This page will help debug camera capture issues.</p>
+        
+        <div>
+            <button id="startBtn">Start Camera</button>
+            <button id="captureBtn" disabled>Capture Image</button>
+            <button id="downloadBtn" disabled>Download Image</button>
+            <button id="stopBtn" disabled>Stop Camera</button>
+        </div>
+
+        <div>
+            <button id="debugBtn" disabled>Debug Video</button>
+            <button id="httpsBtn">Try HTTPS Version</button>
+            <button id="refreshBtn">Refresh Page</button>
+        </div>
+        
+        <div id="info" class="info">
+            Status: Ready to start camera
+        </div>
+        
+        <div>
+            <h3>Video Stream:</h3>
+            <video id="video" width="640" height="480" autoplay muted></video>
+        </div>
+        
+        <div>
+            <h3>Captured Image:</h3>
+            <canvas id="canvas" width="640" height="480"></canvas>
+        </div>
+        
+        <div id="imageInfo" class="info" style="display: none;">
+            Image Info: Not captured yet
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const captureBtn = document.getElementById('captureBtn');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const debugBtn = document.getElementById('debugBtn');
+        const httpsBtn = document.getElementById('httpsBtn');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const info = document.getElementById('info');
+        const imageInfo = document.getElementById('imageInfo');
+        
+        let mediaStream = null;
+        let capturedBlob = null;
+
+        function updateInfo(message, type = 'info') {
+            info.textContent = message;
+            info.className = type;
+            console.log(message);
+        }
+
+        function updateImageInfo(message) {
+            imageInfo.textContent = message;
+            imageInfo.style.display = 'block';
+        }
+
+        startBtn.addEventListener('click', async () => {
+            try {
+                updateInfo('Requesting camera access...', 'info');
+                
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640, min: 480 },
+                        height: { ideal: 480, min: 360 },
+                        facingMode: 'user'
+                    }
+                });
+
+                video.srcObject = mediaStream;
+                
+                video.addEventListener('loadedmetadata', () => {
+                    updateInfo(`Camera started! Video dimensions: ${video.videoWidth}x${video.videoHeight}`, 'success');
+                    startBtn.disabled = true;
+                    captureBtn.disabled = false;
+                    stopBtn.disabled = false;
+                    debugBtn.disabled = false;
+                });
+
+                video.addEventListener('error', (error) => {
+                    updateInfo(`Video error: ${error.message}`, 'error');
+                });
+
+            } catch (error) {
+                updateInfo(`Camera error: ${error.message}`, 'error');
+                console.error('Camera error:', error);
+            }
+        });
+
+        captureBtn.addEventListener('click', () => {
+            try {
+                updateInfo('Capturing image...', 'info');
+
+                // Check video state
+                console.log('Video state:', {
+                    videoWidth: video.videoWidth,
+                    videoHeight: video.videoHeight,
+                    readyState: video.readyState,
+                    currentTime: video.currentTime,
+                    paused: video.paused,
+                    ended: video.ended,
+                    srcObject: !!video.srcObject
+                });
+
+                if (video.videoWidth === 0 || video.videoHeight === 0) {
+                    updateInfo('Video has no dimensions! Trying to wait...', 'error');
+                    // Try waiting a bit more
+                    setTimeout(() => captureWithRetry(), 1000);
+                    return;
+                }
+
+                if (video.readyState < 3) { // HAVE_FUTURE_DATA
+                    updateInfo('Video not ready for capture! Waiting...', 'error');
+                    setTimeout(() => captureWithRetry(), 500);
+                    return;
+                }
+
+                captureWithRetry();
+
+            } catch (error) {
+                updateInfo(`Capture error: ${error.message}`, 'error');
+                console.error('Capture error:', error);
+            }
+        });
+
+        function captureWithRetry() {
+            try {
+                // Wait for next animation frame to ensure video is rendered
+                requestAnimationFrame(() => {
+                    // Set canvas dimensions
+                    canvas.width = video.videoWidth || 640;
+                    canvas.height = video.videoHeight || 480;
+
+                    console.log('Capturing with dimensions:', canvas.width, 'x', canvas.height);
+
+                    // Clear canvas with white background first
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    // Try to draw video frame
+                    try {
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                        // Check if we actually drew something by sampling pixels
+                        const imageData = ctx.getImageData(0, 0, Math.min(50, canvas.width), Math.min(50, canvas.height));
+                        const hasContent = checkImageContent(imageData);
+
+                        console.log('Image has content:', hasContent);
+
+                        if (!hasContent) {
+                            updateInfo('Captured image appears to be empty! Trying alternative method...', 'error');
+                            tryAlternativeCapture();
+                            return;
+                        }
+
+                        // Convert to blob
+                        canvas.toBlob((blob) => {
+                            if (blob) {
+                                capturedBlob = blob;
+                                const sizeKB = Math.round(blob.size / 1024);
+                                updateInfo(`Image captured successfully! Size: ${sizeKB}KB`, 'success');
+                                updateImageInfo(`Blob size: ${blob.size} bytes (${sizeKB}KB), Type: ${blob.type}, Dimensions: ${canvas.width}x${canvas.height}`);
+                                downloadBtn.disabled = false;
+
+                                // Check if image seems valid
+                                if (blob.size < 5000) {
+                                    updateInfo(`Warning: Image is very small (${sizeKB}KB) - likely black/corrupted!`, 'error');
+                                }
+                            } else {
+                                updateInfo('Failed to create image blob!', 'error');
+                            }
+                        }, 'image/jpeg', 0.95);
+
+                    } catch (drawError) {
+                        updateInfo(`Error drawing video to canvas: ${drawError.message}`, 'error');
+                        console.error('Draw error:', drawError);
+                    }
+                });
+
+            } catch (error) {
+                updateInfo(`Capture retry error: ${error.message}`, 'error');
+                console.error('Capture retry error:', error);
+            }
+        }
+
+        function checkImageContent(imageData) {
+            const data = imageData.data;
+            let nonWhitePixels = 0;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+
+                // If pixel is not white or very close to white
+                if (r < 250 || g < 250 || b < 250) {
+                    nonWhitePixels++;
+                }
+            }
+
+            const totalPixels = data.length / 4;
+            const nonWhitePercentage = (nonWhitePixels / totalPixels) * 100;
+
+            console.log('Image content check:', {
+                totalPixels,
+                nonWhitePixels,
+                nonWhitePercentage: nonWhitePercentage.toFixed(2) + '%'
+            });
+
+            return nonWhitePercentage > 5;
+        }
+
+        function tryAlternativeCapture() {
+            updateInfo('Trying alternative capture method...', 'info');
+
+            // Method 1: Try with different canvas settings
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+
+            tempCanvas.width = video.videoWidth || 640;
+            tempCanvas.height = video.videoHeight || 480;
+
+            // Try without clearing canvas first
+            try {
+                tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+
+                tempCanvas.toBlob((blob) => {
+                    if (blob && blob.size > 5000) {
+                        capturedBlob = blob;
+                        const sizeKB = Math.round(blob.size / 1024);
+                        updateInfo(`Alternative capture successful! Size: ${sizeKB}KB`, 'success');
+                        updateImageInfo(`Alternative method - Blob size: ${blob.size} bytes (${sizeKB}KB)`);
+                        downloadBtn.disabled = false;
+
+                        // Copy to main canvas for display
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(tempCanvas, 0, 0);
+                    } else {
+                        updateInfo('Alternative capture also failed - video stream may not be working properly', 'error');
+                        suggestSolutions();
+                    }
+                }, 'image/jpeg', 0.95);
+
+            } catch (error) {
+                updateInfo('Alternative capture failed: ' + error.message, 'error');
+                suggestSolutions();
+            }
+        }
+
+        function suggestSolutions() {
+            const solutions = `
+Possible solutions:
+1. Try a different browser (Chrome, Firefox, Edge)
+2. Check camera permissions in browser settings
+3. Close other applications using the camera
+4. Try using HTTPS instead of HTTP
+5. Update your browser and camera drivers
+6. Try a different camera if available
+            `;
+            updateInfo(solutions, 'error');
+        }
+
+        downloadBtn.addEventListener('click', () => {
+            if (capturedBlob) {
+                const url = URL.createObjectURL(capturedBlob);
+                const link = document.createElement('a');
+                link.download = `camera-test-${Date.now()}.jpg`;
+                link.href = url;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                updateInfo('Image downloaded!', 'success');
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+                video.srcObject = null;
+                updateInfo('Camera stopped', 'info');
+                startBtn.disabled = false;
+                captureBtn.disabled = true;
+                downloadBtn.disabled = true;
+                stopBtn.disabled = true;
+                debugBtn.disabled = true;
+            }
+        });
+
+        debugBtn.addEventListener('click', () => {
+            const debugInfo = {
+                video: {
+                    videoWidth: video.videoWidth,
+                    videoHeight: video.videoHeight,
+                    readyState: video.readyState,
+                    currentTime: video.currentTime,
+                    paused: video.paused,
+                    ended: video.ended,
+                    srcObject: !!video.srcObject,
+                    muted: video.muted,
+                    autoplay: video.autoplay
+                },
+                mediaStream: {
+                    active: mediaStream ? mediaStream.active : false,
+                    tracks: mediaStream ? mediaStream.getTracks().length : 0,
+                    videoTracks: mediaStream ? mediaStream.getVideoTracks().length : 0
+                },
+                browser: {
+                    userAgent: navigator.userAgent,
+                    protocol: window.location.protocol,
+                    host: window.location.host
+                }
+            };
+
+            console.log('Debug Info:', debugInfo);
+            updateInfo('Debug info logged to console. Check Developer Tools (F12)', 'info');
+
+            // Also try to get media stream constraints
+            if (mediaStream && mediaStream.getVideoTracks().length > 0) {
+                const track = mediaStream.getVideoTracks()[0];
+                const settings = track.getSettings();
+                const capabilities = track.getCapabilities();
+                console.log('Video Track Settings:', settings);
+                console.log('Video Track Capabilities:', capabilities);
+            }
+        });
+
+        httpsBtn.addEventListener('click', () => {
+            if (window.location.protocol === 'http:') {
+                const httpsUrl = window.location.href.replace('http:', 'https:');
+                updateInfo('Redirecting to HTTPS...', 'info');
+                window.location.href = httpsUrl;
+            } else {
+                updateInfo('Already using HTTPS', 'info');
+            }
+        });
+
+        refreshBtn.addEventListener('click', () => {
+            window.location.reload();
+        });
+    </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 package com.facerecognition.model;
 
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -50,9 +51,11 @@ public class Person {
     private Boolean isActive = true;
     
     @OneToMany(mappedBy = "person", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonManagedReference("person-facedata")
     private List<FaceData> faceDataList;
-    
+
     @OneToMany(mappedBy = "person", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @JsonManagedReference("person-detectionlog")
     private List<DetectionLog> detectionLogs;
     
     @PrePersist
