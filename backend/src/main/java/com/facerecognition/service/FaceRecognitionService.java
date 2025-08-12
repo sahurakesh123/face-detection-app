@@ -15,8 +15,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.awt.Graphics2D;
-import java.awt.image.BufferedImage;
+import java.awt.*;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -25,8 +25,14 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Iterator;
 import java.util.List;
-import javax.imageio.ImageIO;
+import java.util.stream.Collectors;
+
+import org.apache.commons.text.similarity.JaroWinklerSimilarity;
+
+import net.coobird.thumbnailator.Thumbnails;
 
 @Service
 @RequiredArgsConstructor
@@ -120,117 +126,43 @@ public class FaceRecognitionService {
         tempCascadeFile.toFile().deleteOnExit();
     }
     
-    public String saveImage(MultipartFile file, String personId) throws IOException {
-        // Validate the uploaded file
-        if (file.isEmpty()) {
-            throw new IllegalArgumentException("Uploaded file is empty");
+    public String saveImageFromBase64(String base64Image, String personId) throws IOException {
+        log.info("--- Starting Image Conversion Process from Base64 for person ID: {} ---", personId);
+
+        if (base64Image == null || base64Image.isEmpty()) {
+            throw new IOException("Input Base64 image string is empty.");
         }
 
-        // Get original file extension or default to jpg
-        String originalFileName = file.getOriginalFilename();
-        String fileExtension = ".jpg"; // default
-        if (originalFileName != null && originalFileName.contains(".")) {
-            fileExtension = originalFileName.substring(originalFileName.lastIndexOf("."));
-            // Ensure it's a supported image format
-            if (!fileExtension.toLowerCase().matches("\\.(jpg|jpeg|png|bmp)")) {
-                fileExtension = ".jpg";
-            }
+        // The Base64 string may have a prefix like "data:image/jpeg;base64,". We need to remove it.
+        String pureBase64 = base64Image.contains(",") ? base64Image.substring(base64Image.indexOf(",") + 1) : base64Image;
+        byte[] imageBytes = Base64.getDecoder().decode(pureBase64);
+
+        if (imageBytes.length == 0) {
+            throw new IOException("Decoded byte array is empty.");
         }
 
-        String fileName = "person_" + personId + "_" + System.currentTimeMillis() + fileExtension;
+        String fileName = "person_" + personId + "_" + System.currentTimeMillis() + "_converted.jpg";
         Path filePath = Paths.get(uploadPath, fileName);
-
-        // Ensure the upload directory exists
         Files.createDirectories(filePath.getParent());
 
-        // Save the file using transferTo method which is more reliable for MultipartFile
-        try {
-            file.transferTo(filePath.toFile());
-            log.info("Image saved successfully: {} (size: {} bytes)", filePath, file.getSize());
+        try (InputStream inputStream = new ByteArrayInputStream(imageBytes)) {
+            Thumbnails.of(inputStream)
+                .scale(1.0)
+                .outputFormat("jpg")
+                .toFile(filePath.toFile());
 
-            // Validate that the saved file is readable
-            if (!Files.exists(filePath) || Files.size(filePath) == 0) {
-                throw new IOException("Failed to save image file or file is empty: " + filePath);
+            long fileSize = Files.size(filePath);
+            if (fileSize == 0) {
+                log.error("Thumbnailator created a zero-byte file from Base64 data.");
+                throw new IOException("Failed to save image; output file is empty.");
             }
 
-            // Test if the saved image can be read by OpenCV
-            Mat testImage = Imgcodecs.imread(filePath.toString());
-            if (testImage.empty()) {
-                log.error("Saved image cannot be read by OpenCV: {}", filePath);
-                // Try to save as a different format
-                return saveImageWithConversion(file, personId);
-            }
-            testImage.release(); // Release memory
-
-            return filePath.toString();
-
-        } catch (IOException e) {
-            log.error("Failed to save image using transferTo, trying alternative method: {}", e.getMessage());
-            return saveImageWithBytes(file, fileName, filePath);
-        }
-    }
-
-    private String saveImageWithBytes(MultipartFile file, String fileName, Path filePath) throws IOException {
-        try {
-            // Alternative method using byte array
-            byte[] bytes = file.getBytes();
-            Files.write(filePath, bytes, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
-
-            log.info("Image saved using bytes method: {} (size: {} bytes)", filePath, bytes.length);
-
-            // Validate the saved file
-            if (!Files.exists(filePath) || Files.size(filePath) == 0) {
-                throw new IOException("Failed to save image file or file is empty: " + filePath);
-            }
-
-            return filePath.toString();
-
-        } catch (IOException e) {
-            log.error("Failed to save image using bytes method: {}", e.getMessage());
-            throw new IOException("Unable to save image file: " + fileName, e);
-        }
-    }
-
-    private String saveImageWithConversion(MultipartFile file, String personId) throws IOException {
-        log.info("Attempting to save image with format conversion...");
-
-        try {
-            // Read the image using Java's ImageIO
-            BufferedImage bufferedImage = ImageIO.read(file.getInputStream());
-            if (bufferedImage == null) {
-                throw new IOException("Cannot read image data from uploaded file");
-            }
-
-            String fileName = "person_" + personId + "_" + System.currentTimeMillis() + "_converted.jpg";
-            Path filePath = Paths.get(uploadPath, fileName);
-
-            // Convert to RGB if necessary (removes alpha channel)
-            if (bufferedImage.getType() != BufferedImage.TYPE_3BYTE_BGR) {
-                BufferedImage rgbImage = new BufferedImage(
-                    bufferedImage.getWidth(),
-                    bufferedImage.getHeight(),
-                    BufferedImage.TYPE_3BYTE_BGR
-                );
-                Graphics2D g = rgbImage.createGraphics();
-                g.drawImage(bufferedImage, 0, 0, null);
-                g.dispose();
-                bufferedImage = rgbImage;
-            }
-
-            // Save as JPEG
-            boolean saved = ImageIO.write(bufferedImage, "jpg", filePath.toFile());
-            if (!saved) {
-                throw new IOException("Failed to write image file");
-            }
-
-            log.info("Image saved with conversion: {} (dimensions: {}x{})",
-                    filePath, bufferedImage.getWidth(), bufferedImage.getHeight());
-
+            log.info("Successfully saved image from Base64 data. Path: {}, Size: {} bytes", filePath, fileSize);
             return filePath.toString();
 
         } catch (Exception e) {
-            log.error("Failed to save image with conversion: {}", e.getMessage());
-            throw new IOException("Unable to save and convert image file", e);
+            log.error("--- EXCEPTION during Thumbnailator Base64 Conversion ---", e);
+            throw new IOException("Critical error during Base64 image processing: " + e.getMessage(), e);
         }
     }
     
@@ -330,28 +262,38 @@ public class FaceRecognitionService {
     }
     
     public String extractFaceEncoding(String imagePath) {
-        // First, validate and preprocess the image
-        if (!validateImageForFaceDetection(imagePath)) {
-            log.error("Image validation failed for: {}", imagePath);
+        Mat image = loadImage(imagePath);
+        if (image.empty()) {
+            log.error("Cannot load image from path: {}", imagePath);
             return null;
         }
+        log.info("Processing image: {} (size: {}x{})", imagePath, image.width(), image.height());
 
-        List<Rect> faces = detectFaces(imagePath);
-        if (faces.isEmpty()) {
-            log.warn("No faces detected in image: {}", imagePath);
+        MatOfRect faces = new MatOfRect();
+        // --- Performance Optimization ---
+        // Set a minimum face size. This is a crucial optimization.
+        // It prevents the detector from searching for tiny, irrelevant faces.
+        // A value of 20-30% of the image height is a good starting point.
+        int absoluteFaceSize = (int) (image.height() * 0.2);
+        Size minFaceSize = new Size(absoluteFaceSize, absoluteFaceSize);
+        
+        log.info("Starting face detection with min face size: {}", minFaceSize);
+        long startTime = System.currentTimeMillis();
+
+        faceDetector.detectMultiScale(image, faces, 1.1, 3, 0, minFaceSize, new Size());
+
+        long duration = System.currentTimeMillis() - startTime;
+        log.info("Face detection completed in {} ms. Found {} faces.", duration, faces.toArray().length);
+
+        if (faces.empty()) {
+            log.warn("No faces detected in the image.");
             return null;
         }
 
         // Get the largest detected face (most likely to be the main subject)
-        Rect faceRect = getLargestFace(faces);
+        Rect faceRect = getLargestFace(List.of(faces.toArray()));
         log.info("Extracting face encoding from largest detected face at: x={}, y={}, width={}, height={}",
                  faceRect.x, faceRect.y, faceRect.width, faceRect.height);
-
-        Mat image = Imgcodecs.imread(imagePath);
-        if (image.empty()) {
-            log.error("Could not reload image for face extraction: {}", imagePath);
-            return null;
-        }
 
         Mat faceROI = new Mat(image, faceRect);
 
@@ -399,7 +341,7 @@ public class FaceRecognitionService {
                 .orElse(faces.get(0));
     }
     
-    public Person matchFace(String capturedImagePath, Double latitude, Double longitude) {
+    public Person matchFace(String capturedImagePath) {
         String capturedEncoding = extractFaceEncoding(capturedImagePath);
         if (capturedEncoding == null) {
             return null;
@@ -421,16 +363,26 @@ public class FaceRecognitionService {
         return matchedPerson;
     }
     
+    public double getBestMatchConfidence(String capturedEncoding) {
+        if (capturedEncoding == null) return 0.0;
+        List<FaceData> allFaceData = faceDataRepository.findByIsActiveTrue();
+        double bestMatch = 0.0;
+        for (FaceData faceData : allFaceData) {
+            double similarity = calculateSimilarity(capturedEncoding, faceData.getFaceEncoding());
+            if (similarity > bestMatch) {
+                bestMatch = similarity;
+            }
+        }
+        return bestMatch;
+    }
+    
     private double calculateSimilarity(String encoding1, String encoding2) {
-        // Simplified similarity calculation
-        // In production, use proper face recognition algorithms
         if (encoding1 == null || encoding2 == null) {
             return 0.0;
         }
-        
-        // Simple string comparison for demonstration
-        // Replace with actual face encoding comparison
-        return encoding1.equals(encoding2) ? 1.0 : 0.3;
+        // Use Jaro-Winkler similarity for a more nuanced comparison
+        JaroWinklerSimilarity jwSimilarity = new JaroWinklerSimilarity();
+        return jwSimilarity.apply(encoding1, encoding2);
     }
     
     private String matToString(Mat mat) {
@@ -441,6 +393,37 @@ public class FaceRecognitionService {
         return java.util.Base64.getEncoder().encodeToString(data);
     }
     
+    public void registerFaces(Person person, List<String> base64Images) throws IOException {
+        List<FaceData> registeredFaces = new ArrayList<>();
+        for (String base64Image : base64Images) {
+            String imagePath = saveImageFromBase64(base64Image, String.valueOf(person.getId()));
+            
+            String faceEncoding = extractFaceEncoding(imagePath);
+            if (faceEncoding == null) {
+                log.warn("No face detected in one of the provided images for person {}. Skipping this image.", person.getEmail());
+                continue; // Skip this image and continue with the next
+            }
+
+            FaceData faceData = new FaceData();
+            faceData.setPerson(person);
+            faceData.setImagePath(imagePath);
+            faceData.setFaceEncoding(faceEncoding);
+            faceData.setConfidenceScore(1.0); // Initial registration has max confidence
+            registeredFaces.add(faceData);
+        }
+
+        if (registeredFaces.isEmpty()) {
+            throw new IllegalArgumentException("No faces could be detected in any of the provided images.");
+        }
+
+        faceDataRepository.saveAll(registeredFaces);
+        log.info("Successfully registered {} new face images for person {}", registeredFaces.size(), person.getEmail());
+    }
+
+    public Mat loadImage(String imagePath) {
+        return Imgcodecs.imread(imagePath);
+    }
+
     public boolean validateImage(MultipartFile file) {
         if (file.isEmpty()) {
             return false;

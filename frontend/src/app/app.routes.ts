@@ -22,5 +22,9 @@ export const routes: Routes = [
     path: 'detections', 
     loadComponent: () => import('./components/detection-history/detection-history.component').then(m => m.DetectionHistoryComponent)
   },
+  { 
+    path: 'debug', 
+    loadComponent: () => import('./components/debug/image-test.component').then(m => m.ImageTestComponent)
+  },
   { path: '**', redirectTo: '/dashboard' }
 ];

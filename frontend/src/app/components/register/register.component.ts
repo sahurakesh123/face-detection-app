@@ -9,6 +9,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { ApiService } from '../../services/api.service';
+import { Router } from '@angular/router';
 
 @Component({
   selector: 'app-register',
@@ -232,14 +233,18 @@ export class RegisterComponent implements OnInit, OnDestroy {
   registerForm: FormGroup;
   cameraActive = false;
   capturedImage: string | null = null;
-  capturedBlob: Blob | null = null;
+  private capturedBlob: Blob | null = null;
   isLoading = false;
   mediaStream: MediaStream | null = null;
+
+  private readonly imageMaxWidth = 640; // Max width for the captured image
+  private readonly imageQuality = 0.92; // JPEG quality (0.0 to 1.0)
 
   constructor(
     private fb: FormBuilder,
     private apiService: ApiService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private router: Router
   ) {
     this.registerForm = this.fb.group({
       firstName: ['', [Validators.required, Validators.minLength(2)]],
@@ -277,14 +282,31 @@ export class RegisterComponent implements OnInit, OnDestroy {
     const context = canvas.getContext('2d');
 
     if (context) {
-      context.drawImage(video, 0, 0, 320, 240);
-      canvas.toBlob((blob) => {
-        if (blob) {
-          this.capturedBlob = blob;
-          this.capturedImage = URL.createObjectURL(blob);
-          this.stopCamera();
-        }
-      }, 'image/jpeg', 0.8);
+      // Calculate the aspect ratio to maintain proportions
+      const aspectRatio = video.videoHeight / video.videoWidth;
+      const width = this.imageMaxWidth;
+      const height = width * aspectRatio;
+
+      canvas.width = width;
+      canvas.height = height;
+
+      // Draw the video frame to the canvas, resizing it in the process
+      context.drawImage(video, 0, 0, width, height);
+
+      // Get the data URL for preview
+      this.capturedImage = canvas.toDataURL('image/jpeg', this.imageQuality);
+
+      // Get the blob for upload
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            this.capturedBlob = blob;
+            this.snackBar.open(`Image captured (~${Math.round(blob.size / 1024)} KB)`, 'Close', { duration: 2000 });
+          }
+        },
+        'image/jpeg',
+        this.imageQuality
+      );
     }
   }
 
@@ -303,43 +325,52 @@ export class RegisterComponent implements OnInit, OnDestroy {
   }
 
   onSubmit() {
-    if (this.registerForm.valid && this.capturedBlob) {
-      this.isLoading = true;
-
-      const formData = new FormData();
-      formData.append('firstName', this.registerForm.get('firstName')?.value);
-      formData.append('lastName', this.registerForm.get('lastName')?.value);
-      formData.append('email', this.registerForm.get('email')?.value);
-      
-      if (this.registerForm.get('phoneNumber')?.value) {
-        formData.append('phoneNumber', this.registerForm.get('phoneNumber')?.value);
-      }
-      
-      if (this.registerForm.get('address')?.value) {
-        formData.append('address', this.registerForm.get('address')?.value);
-      }
-      
-      formData.append('faceImage', this.capturedBlob, 'face.jpg');
-
-      this.apiService.registerPerson(formData).subscribe({
-        next: (response) => {
-          this.isLoading = false;
-          this.snackBar.open('Person registered successfully!', 'Close', {
-            duration: 5000,
-            panelClass: ['success-snackbar']
-          });
-          this.resetForm();
-        },
-        error: (error) => {
-          this.isLoading = false;
-          const errorMessage = error.error?.message || 'Registration failed. Please try again.';
-          this.snackBar.open(errorMessage, 'Close', {
-            duration: 5000,
-            panelClass: ['error-snackbar']
-          });
-        }
-      });
+    if (this.registerForm.invalid || !this.capturedImage) {
+      this.snackBar.open('Please fill all required fields and capture at least one image.', 'Close', { duration: 3000 });
+      return;
     }
+
+    this.isLoading = true;
+
+    const convertBlobToBase64 = (blob: Blob): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    };
+
+    convertBlobToBase64(this.capturedBlob as Blob)
+      .then(base64Image => {
+        const formValue = this.registerForm.value;
+        const payload = {
+          name: `${formValue.firstName} ${formValue.lastName}`.trim(),
+          email: formValue.email,
+          phoneNumber: formValue.phoneNumber,
+          address: formValue.address,
+          base64Image: base64Image.split(',')[1] // Send only the Base64 part of the image
+        };
+
+        this.apiService.registerPerson(payload).subscribe({
+          next: (response) => {
+            this.isLoading = false;
+            this.snackBar.open('Person registered successfully!', 'Close', { duration: 5000, panelClass: ['success-snackbar'] });
+            this.resetForm();
+            this.router.navigate(['/persons']); // Optional: navigate to persons list
+          },
+          error: (error) => {
+            this.isLoading = false;
+            const errorMessage = error.error?.message || 'Registration failed. Please try again.';
+            this.snackBar.open(errorMessage, 'Close', { duration: 5000, panelClass: ['error-snackbar'] });
+          }
+        });
+      })
+      .catch(error => {
+        this.isLoading = false;
+        this.snackBar.open('Failed to process images for upload.', 'Close', { duration: 5000 });
+        console.error('Error converting blobs to Base64', error);
+      });
   }
 
   resetForm() {

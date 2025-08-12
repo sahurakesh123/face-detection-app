@@ -64,7 +64,7 @@ public class EmailService {
                         <h3>Person Detected</h3>
                         
                         <div class="detail">
-                            <span class="label">Name:</span> %s %s
+                            <span class="label">Name:</span> %s
                         </div>
                         
                         <div class="detail">
@@ -111,8 +111,7 @@ public class EmailService {
             </body>
             </html>
             """,
-            person.getFirstName(),
-            person.getLastName(),
+            person.getName(),
             person.getEmail(),
             person.getPhoneNumber() != null ? person.getPhoneNumber() : "N/A",
             detectionLog.getDetectionTime().format(formatter),

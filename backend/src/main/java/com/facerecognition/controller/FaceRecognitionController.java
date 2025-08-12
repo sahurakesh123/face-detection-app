@@ -1,7 +1,14 @@
 package com.facerecognition.controller;
 
+import com.facerecognition.dto.DetectionRequest;
+import com.facerecognition.dto.PersonRegistrationRequest;
 import com.facerecognition.model.DetectionLog;
+import com.facerecognition.model.Person;
 import com.facerecognition.service.DetectionService;
+import com.facerecognition.service.PersonService;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.Builder;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -9,55 +16,72 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
-@RequestMapping("/face")
+@RequestMapping("/")
 @RequiredArgsConstructor
 @Slf4j
 @CrossOrigin(origins = "${app.cors.allowed-origins}")
 public class FaceRecognitionController {
     
+    private final PersonService personService;
     private final DetectionService detectionService;
     
-    @PostMapping("/detect")
-    public ResponseEntity<?> detectAndMatchFace(
-            @RequestParam("image") MultipartFile image,
-            @RequestParam(value = "latitude", required = false) Double latitude,
-            @RequestParam(value = "longitude", required = false) Double longitude,
-            @RequestParam(value = "cameraId", required = false) String cameraId,
-            @RequestParam(value = "cameraType", required = false, defaultValue = "browser") String cameraType,
-            @RequestParam(value = "locationAddress", required = false) String locationAddress) {
-        
+    // DTO for the detection response
+    @Data
+    @Builder
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class DetectionResponse {
+        private boolean matched;
+        private Person person;
+        private Double confidence;
+        private LocalDateTime detectionTime;
+    }
+
+    @PostMapping("/persons/register")
+    public ResponseEntity<?> registerPerson(@RequestBody PersonRegistrationRequest request) {
         try {
-            DetectionLog detectionLog = detectionService.processFaceDetection(
-                image, latitude, longitude, cameraId, cameraType, locationAddress
-            );
-            
-            boolean personMatched = detectionLog.getPerson() != null;
-            
-            return ResponseEntity.ok(Map.of(
-                "success", true,
-                "matched", personMatched,
-                "detectionId", detectionLog.getId(),
-                "person", personMatched ? detectionLog.getPerson() : null,
-                "confidence", detectionLog.getConfidenceScore(),
-                "detectionTime", detectionLog.getDetectionTime(),
-                "message", personMatched ? "Face matched successfully" : "Face detected but no match found"
-            ));
-            
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest().body(Map.of(
-                "success", false,
-                "message", e.getMessage()
-            ));
+            Person registeredPerson = personService.registerPerson(request.getName(), request.getEmail(), request.getBase64Image());
+            return ResponseEntity.ok(registeredPerson);
         } catch (Exception e) {
-            log.error("Error processing face detection", e);
+            log.error("Error during person registration", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(e.getMessage());
+        }
+    }
+    
+    @GetMapping("/persons")
+    public ResponseEntity<?> getAllPersons() {
+        try {
+            List<Person> persons = personService.getAllActivePersons();
+            return ResponseEntity.ok(persons);
+        } catch (Exception e) {
+            log.error("Error fetching persons", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                 "success", false,
-                "message", "Internal server error"
+                "message", "Error fetching persons"
             ));
         }
+    }
+    
+    @PostMapping("/detections/detect")
+    public ResponseEntity<?> detectAndMatchFace(@RequestBody DetectionRequest request) {
+        log.info("Received face detection request for camera ID: {}", request.getCameraId());
+        detectionService.processFaceDetection(request);
+        // Return 202 Accepted with proper JSON response
+        return ResponseEntity.accepted().body(Map.of(
+            "success", true,
+            "message", "Request received and is being processed.",
+            "cameraId", request.getCameraId(),
+            "status", "processing"
+        ));
     }
     
     @GetMapping("/detections/recent")
@@ -100,6 +124,39 @@ public class FaceRecognitionController {
                 "success", false,
                 "message", "Error fetching detections"
             ));
+        }
+    }
+    
+    @PostMapping("/face/test-upload")
+    public ResponseEntity<?> testImageUpload(@RequestParam("image") MultipartFile imageFile) {
+        try {
+            // Log the incoming image details
+            log.info("TEST UPLOAD: Received image: name={}, size={}KB, type={}", 
+                     imageFile.getOriginalFilename(), imageFile.getSize()/1024, imageFile.getContentType());
+            
+            // Save the image to verify it's not corrupt
+            String filename = UUID.randomUUID().toString() + ".jpg";
+            Path uploadDir = Paths.get("C:/workspace/face-detection-app/uploads/test");
+            Files.createDirectories(uploadDir);
+            
+            Path filePath = uploadDir.resolve(filename);
+            Files.copy(imageFile.getInputStream(), filePath);
+            
+            // Try to read it back to verify
+            byte[] fileContent = Files.readAllBytes(filePath);
+            
+            return ResponseEntity.ok().body(Map.of(
+                "message", "Test image received and saved successfully",
+                "filename", filename,
+                "size", imageFile.getSize(),
+                "contentType", imageFile.getContentType(),
+                "path", filePath.toString(),
+                "isReadable", Files.isReadable(filePath),
+                "fileSize", fileContent.length
+            ));
+        } catch (IOException e) {
+            log.error("Error in test upload", e);
+            return ResponseEntity.badRequest().body("Error: " + e.getMessage());
         }
     }
 }

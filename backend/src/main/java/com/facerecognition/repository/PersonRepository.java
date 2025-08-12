@@ -15,7 +15,7 @@ public interface PersonRepository extends JpaRepository<Person, Long> {
     
     List<Person> findByIsActiveTrue();
     
-    @Query("SELECT p FROM Person p WHERE p.firstName LIKE %:name% OR p.lastName LIKE %:name%")
+    @Query("SELECT p FROM Person p WHERE p.name LIKE %:name%")
     List<Person> findByNameContaining(String name);
     
     @Query("SELECT p FROM Person p WHERE p.phoneNumber = :phoneNumber")

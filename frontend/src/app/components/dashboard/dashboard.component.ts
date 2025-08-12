@@ -98,22 +98,19 @@ import { DetectionLog } from '../../models/detection.model';
               </mat-card-title>
             </mat-card-header>
             <mat-card-content>
-              <div class="action-buttons">
+              <div class="d-grid gap-2">
                 <button mat-raised-button color="primary" routerLink="/detect" class="action-btn">
                   <mat-icon>camera_alt</mat-icon>
-                  Start Face Detection
+                  Live Detection
                 </button>
-                
                 <button mat-raised-button color="accent" routerLink="/register" class="action-btn">
                   <mat-icon>person_add</mat-icon>
-                  Register New Person
+                  Register Person
                 </button>
-                
                 <button mat-raised-button routerLink="/persons" class="action-btn">
                   <mat-icon>people</mat-icon>
                   View All Persons
                 </button>
-                
                 <button mat-raised-button routerLink="/detections" class="action-btn">
                   <mat-icon>history</mat-icon>
                   Detection History

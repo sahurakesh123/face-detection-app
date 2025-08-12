@@ -64,7 +64,7 @@ public class SmsService {
         
         StringBuilder sb = new StringBuilder();
         sb.append("🚨 FACE RECOGNITION ALERT\n\n");
-        sb.append("Person: ").append(person.getFirstName()).append(" ").append(person.getLastName()).append("\n");
+        sb.append("Person: ").append(person.getName()).append("\n");
         sb.append("Time: ").append(detectionLog.getDetectionTime().format(formatter)).append("\n");
         
         if (detectionLog.getCameraId() != null) {

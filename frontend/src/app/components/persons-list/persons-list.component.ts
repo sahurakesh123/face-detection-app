@@ -362,7 +362,7 @@ export class PersonsListComponent implements OnInit {
         this.persons = persons;
         this.filteredPersons = persons;
       },
-      error: (error) => {
+      error: (error: any) => {
         console.error('Error loading persons:', error);
         this.snackBar.open('Error loading persons', 'Close', { duration: 3000 });
       }
@@ -395,9 +395,9 @@ export class PersonsListComponent implements OnInit {
           this.loadPersons();
           this.selectedPerson = null;
         },
-        error: (error) => {
-          console.error('Error deactivating person:', error);
+        error: (error: any) => {
           this.snackBar.open('Error deactivating person', 'Close', { duration: 3000 });
+          console.error('Error deactivating person:', error);
         }
       });
     }

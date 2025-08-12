@@ -24,8 +24,12 @@ public class FaceData {
     @JsonBackReference("person-facedata")
     private Person person;
     
-    @Column(name = "image_path", nullable = false)
+    @Column(name = "image_path", nullable = true)
     private String imagePath;
+    
+    @Lob
+    @Column(name = "base64_image_data", columnDefinition = "LONGTEXT")
+    private String base64ImageData;
     
     @Lob
     @Column(name = "face_encoding", columnDefinition = "LONGTEXT")

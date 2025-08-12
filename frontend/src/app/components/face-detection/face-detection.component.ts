@@ -7,9 +7,12 @@ import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../services/api.service';
-import { FaceDetectionResponse, GeolocationCoordinates } from '../../models/detection.model';
+import { WebSocketService } from '../../services/websocket.service';
+import { FaceDetectionResponse, GeolocationCoordinates, DetectionLog, DetectionRequest } from '../../models/detection.model';
+import { Subscription } from 'rxjs';
 
 @Component({
   selector: 'app-face-detection',
@@ -23,7 +26,8 @@ import { FaceDetectionResponse, GeolocationCoordinates } from '../../models/dete
     MatSnackBarModule,
     MatProgressSpinnerModule,
     MatFormFieldModule,
-    MatInputModule
+    MatInputModule,
+    MatTooltipModule
   ],
   template: `
     <div class="container">
@@ -60,7 +64,7 @@ import { FaceDetectionResponse, GeolocationCoordinates } from '../../models/dete
 
                 <div class="camera-controls mt-3">
                   <button mat-raised-button color="primary"
-                          (click)="safeStartCamera()" *ngIf="!cameraActive" class="me-2">
+                          (click)="safeStartCamera()" *ngIf="!cameraActive" class="me-2" matTooltip="Start the camera feed">
                     <mat-icon>videocam</mat-icon>
                     Start Camera
                   </button>
@@ -69,7 +73,7 @@ import { FaceDetectionResponse, GeolocationCoordinates } from '../../models/dete
                           (click)="captureAndDetect()"
                           *ngIf="cameraActive"
                           [disabled]="isProcessing"
-                          class="btn-capture me-2">
+                          class="btn-capture me-2" matTooltip="Capture the current frame and detect faces">
                     <mat-spinner diameter="20" *ngIf="isProcessing" class="me-2"></mat-spinner>
                     <mat-icon *ngIf="!isProcessing">camera</mat-icon>
                     {{ isProcessing ? 'Processing...' : 'Capture & Detect' }}
@@ -78,7 +82,7 @@ import { FaceDetectionResponse, GeolocationCoordinates } from '../../models/dete
                   <button mat-raised-button color="warn"
                           (click)="testCapture()"
                           *ngIf="cameraActive"
-                          class="me-2">
+                          class="me-2" matTooltip="Capture a test image without sending to backend">
                     <mat-icon>bug_report</mat-icon>
                     Test Capture
                   </button>
@@ -86,12 +90,12 @@ import { FaceDetectionResponse, GeolocationCoordinates } from '../../models/dete
                   <button mat-raised-button color="primary"
                           (click)="restartCamera()"
                           *ngIf="cameraActive"
-                          class="me-2">
+                          class="me-2" matTooltip="Stop and start the camera again">
                     <mat-icon>refresh</mat-icon>
                     Restart Camera
                   </button>
 
-                  <button mat-button color="warn" (click)="stopCamera()" *ngIf="cameraActive">
+                  <button mat-button color="warn" (click)="stopCamera()" *ngIf="cameraActive" matTooltip="Stop the camera feed">
                     <mat-icon>stop</mat-icon>
                     Stop Camera
                   </button>
@@ -405,21 +409,70 @@ export class FaceDetectionComponent implements OnInit, AfterViewInit, OnDestroy 
   cameraType = 'browser';
   lastDetectionResult: FaceDetectionResponse | null = null;
 
+  // Image settings for performance
+  private readonly imageMaxWidth = 640;
+  private readonly imageQuality = 0.92;
+
+  private wsSubscription!: Subscription;
+
   constructor(
     private apiService: ApiService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private webSocketService: WebSocketService
   ) {}
 
-  ngOnInit() {
+  ngOnInit(): void {
     this.getCurrentLocation();
+    this.connectToWebSocket();
   }
 
   ngAfterViewInit() {
-    // ViewChild elements are now available
     console.log('View initialized, camera elements ready:', this.checkCameraElementsReady());
   }
 
-  // Safe method to start camera that can be called from template
+  ngOnDestroy(): void {
+    this.stopCamera();
+    if (this.wsSubscription) {
+      this.wsSubscription.unsubscribe();
+    }
+    this.webSocketService.disconnect();
+  }
+
+  connectToWebSocket(): void {
+    // Connect to the WebSocket endpoint (URL is now configured in the service)
+    this.webSocketService.connect();
+
+    // Subscribe to connection status
+    this.webSocketService.onConnect().subscribe(connected => {
+      if (connected) {
+        console.log('Successfully connected to WebSocket broker.');
+        this.subscribeToDetectionResults();
+      } else {
+        console.log('Disconnected from WebSocket broker.');
+      }
+    });
+  }
+
+  subscribeToDetectionResults(): void {
+    const topic = `/topic/detection-results/${this.cameraId}`;
+    console.log(`Subscribing to WebSocket topic: ${topic}`)
+    this.wsSubscription = this.webSocketService.subscribe(topic).subscribe((message) => {
+      const result: DetectionLog = JSON.parse(message.body);
+      console.log('Received detection result via WebSocket:', result);
+      this.lastDetectionResult = this.mapDetectionLogToResponse(result);
+      this.isProcessing = false; // Stop the spinner
+      this.snackBar.open('Detection result received!', 'Close', { duration: 3000 });
+    });
+
+    // Also subscribe to the error topic
+    const errorTopic = `/topic/detection-error/${this.cameraId}`;
+    this.webSocketService.subscribe(errorTopic).subscribe((message) => {
+      console.error('Received error via WebSocket:', message.body);
+      this.snackBar.open(`Error from server: ${message.body}`, 'Close', { duration: 7000 });
+      this.isProcessing = false;
+    });
+  }
+
   safeStartCamera() {
     if (!this.checkCameraElementsReady()) {
       // If elements are not ready, wait a bit and try again
@@ -438,8 +491,203 @@ export class FaceDetectionComponent implements OnInit, AfterViewInit, OnDestroy 
     }
   }
 
-  ngOnDestroy() {
+  async startCamera() {
+    try {
+      // Check if elements are ready
+      if (!this.checkCameraElementsReady()) {
+        console.warn('Camera elements not ready, retrying...');
+        await new Promise(resolve => setTimeout(resolve, 100)); // Wait and retry
+        if (!this.checkCameraElementsReady()) {
+          this.snackBar.open('Camera elements failed to initialize.', 'Close', { duration: 3000 });
+          return;
+        }
+      }
+
+      // Stop any existing stream
+      if (this.mediaStream) {
+        this.mediaStream.getTracks().forEach(track => track.stop());
+      }
+
+      // Get the media stream with higher resolution
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640, min: 480 },
+          height: { ideal: 480, min: 360 },
+          frameRate: { ideal: 15 }
+        }
+      });
+
+      this.videoElement.nativeElement.srcObject = this.mediaStream;
+      await this.videoElement.nativeElement.play();
+      this.cameraActive = true;
+      this.snackBar.open('Camera started successfully!', 'Close', { duration: 2000 });
+
+    } catch (error) {
+      console.error('Error starting camera:', error);
+      this.snackBar.open('Could not start camera. Please check permissions.', 'Close', { duration: 5000 });
+    }
+  }
+
+  stopCamera() {
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream = null;
+    }
+    this.cameraActive = false;
+    console.log('Camera stopped');
+  }
+
+  // Method to restart camera (useful when video stream gets corrupted)
+  restartCamera() {
+    console.log('Restarting camera...');
     this.stopCamera();
+    setTimeout(() => {
+      this.safeStartCamera();
+    }, 1000); // Wait 1 second before restarting
+  }
+
+  // Check if video stream is healthy
+  checkVideoHealth(): boolean {
+    if (!this.videoElement || !this.videoElement.nativeElement) {
+      return false;
+    }
+
+    const video = this.videoElement.nativeElement;
+    const isHealthy = video.videoWidth > 0 &&
+                     video.videoHeight > 0 &&
+                     video.readyState >= 3 &&
+                     !video.paused &&
+                     !video.ended &&
+                     video.srcObject !== null;
+
+    console.log('Video health check:', {
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      readyState: video.readyState,
+      paused: video.paused,
+      ended: video.ended,
+      hasSrcObject: !!video.srcObject,
+      isHealthy: isHealthy
+    });
+
+    return isHealthy;
+  }
+
+  captureAndDetect(): void {
+    if (!this.currentLocation) {
+      this.snackBar.open('Could not get location. Cannot proceed with detection.', 'Close', { duration: 5000 });
+      this.getCurrentLocation();
+      return;
+    }
+
+    this.isProcessing = true;
+    const video = this.videoElement.nativeElement;
+    const canvas = this.canvasElement.nativeElement;
+    const context = canvas.getContext('2d');
+
+    if (context) {
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const fullBase64Image = canvas.toDataURL('image/jpeg');
+      // Strip the prefix from the base64 string
+      const base64Image = fullBase64Image.replace(/^data:image\/jpeg;base64,/, '');
+
+      const request: DetectionRequest = {
+        base64Image: base64Image,
+        latitude: this.currentLocation.latitude,
+        longitude: this.currentLocation.longitude,
+        cameraId: this.cameraId,
+        cameraType: this.cameraType
+      };
+
+      // Call the non-blocking API endpoint
+      this.apiService.detectFace(request).subscribe({
+        next: (response) => {
+          console.log('Detection request accepted by server:', response);
+          this.snackBar.open('Detection in progress...', 'Close', { duration: 2000 });
+        },
+        error: (err) => {
+          console.error('Error sending detection request:', err);
+          this.snackBar.open('Failed to send detection request.', 'Close', { duration: 5000 });
+          this.isProcessing = false;
+        }
+      });
+    }
+  }
+
+  // Helper to map backend log to frontend response model
+  mapDetectionLogToResponse(log: DetectionLog): FaceDetectionResponse {
+      return {
+          success: !!log.person,
+          matched: !!log.person,
+          person: log.person,
+          confidence: log.confidenceScore,
+          detectionTime: log.detectionTime,
+          detectionId: log.id,
+          message: log.person ? 'Match found' : 'No match found'
+      };
+  }
+
+  private checkImageData(imageData: ImageData): boolean {
+    const data = imageData.data;
+    let nonWhitePixels = 0;
+
+    // Check if there are non-white pixels (indicating actual image content)
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      // If pixel is not white or very close to white
+      if (r < 250 || g < 250 || b < 250) {
+        nonWhitePixels++;
+      }
+    }
+
+    const totalPixels = data.length / 4;
+    const nonWhitePercentage = (nonWhitePixels / totalPixels) * 100;
+
+    console.log('Image data check:', {
+      totalPixels,
+      nonWhitePixels,
+      nonWhitePercentage: nonWhitePercentage.toFixed(2) + '%'
+    });
+
+    // If more than 5% of pixels are non-white, we likely have image content
+    return nonWhitePercentage > 5;
+  }
+
+  getCurrentLocation() {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          this.currentLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy
+          };
+          this.getAddressFromCoordinates();
+        },
+        (error) => {
+          console.error('Error getting location:', error);
+          const errorMessage = `Geolocation error: ${error.message}. Please ensure location services are enabled and permissions are granted for this site.`;
+          this.snackBar.open(errorMessage, 'Close', { duration: 7000 });
+          this.currentLocation = null; // Explicitly set to null on error
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // Options for better accuracy
+      );
+    } else {
+      console.error('Geolocation is not supported by this browser.');
+      this.snackBar.open('Geolocation is not supported by this browser.', 'Close', { duration: 5000 });
+      this.currentLocation = null; // Explicitly set to null
+    }
+  }
+
+  getAddressFromCoordinates() {
+    if (!this.currentLocation) return;
+    
+    // In a real application, you would use a geocoding service here
+    // For demo purposes, we'll create a simple address format
+    this.locationAddress = `Lat: ${this.currentLocation.latitude.toFixed(6)}, Lng: ${this.currentLocation.longitude.toFixed(6)}`;
   }
 
   // Debug method to test image capture without sending to backend
@@ -542,506 +790,5 @@ export class FaceDetectionComponent implements OnInit, AfterViewInit, OnDestroy 
   private checkCameraElementsReady(): boolean {
     return !!(this.videoElement && this.videoElement.nativeElement &&
               this.canvasElement && this.canvasElement.nativeElement);
-  }
-
-  async startCamera() {
-    try {
-      // Check if elements are ready
-      if (!this.checkCameraElementsReady()) {
-        console.error('Camera elements not ready');
-        this.snackBar.open('Camera interface not ready. Please try again.', 'Close', {
-          duration: 3000
-        });
-        return;
-      }
-
-      // Get the media stream with higher resolution
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 640, min: 480 },
-          height: { ideal: 480, min: 360 },
-          facingMode: 'user' // Front camera for selfies
-        }
-      });
-
-      // Set the video source
-      const videoElement = this.videoElement.nativeElement;
-      videoElement.srcObject = this.mediaStream;
-
-      // Create a promise to wait for video to be fully ready
-      const videoReady = new Promise<void>((resolve, reject) => {
-        let resolved = false;
-
-        const checkVideoReady = () => {
-          if (resolved) return;
-
-          console.log('Checking video readiness:', {
-            videoWidth: videoElement.videoWidth,
-            videoHeight: videoElement.videoHeight,
-            readyState: videoElement.readyState,
-            currentTime: videoElement.currentTime,
-            paused: videoElement.paused
-          });
-
-          // Check if video has valid dimensions and is ready
-          if (videoElement.videoWidth > 0 &&
-              videoElement.videoHeight > 0 &&
-              videoElement.readyState >= 3 && // HAVE_FUTURE_DATA
-              videoElement.currentTime > 0) {
-            resolved = true;
-            resolve();
-          }
-        };
-
-        const onLoadedData = () => {
-          console.log('Video loadeddata event fired');
-          setTimeout(checkVideoReady, 100); // Small delay to ensure video is really ready
-        };
-
-        const onCanPlay = () => {
-          console.log('Video canplay event fired');
-          setTimeout(checkVideoReady, 100);
-        };
-
-        const onTimeUpdate = () => {
-          console.log('Video timeupdate event fired');
-          checkVideoReady();
-        };
-
-        const onError = (error: any) => {
-          console.error('Video loading error:', error);
-          if (!resolved) {
-            resolved = true;
-            reject(error);
-          }
-        };
-
-        // Listen for multiple events to ensure video is ready
-        videoElement.addEventListener('loadeddata', onLoadedData, { once: true });
-        videoElement.addEventListener('canplay', onCanPlay, { once: true });
-        videoElement.addEventListener('timeupdate', onTimeUpdate, { once: true });
-        videoElement.addEventListener('error', onError, { once: true });
-
-        // Timeout after 15 seconds
-        setTimeout(() => {
-          if (!resolved) {
-            resolved = true;
-            reject(new Error('Video loading timeout - camera may not be working properly'));
-          }
-        }, 15000);
-      });
-
-      // Start playing the video
-      await videoElement.play();
-      console.log('Video play() called successfully');
-
-      // Wait for video to be fully ready
-      await videoReady;
-
-      // Set cameraActive to true to show the video
-      this.cameraActive = true;
-      console.log('Camera started successfully and ready for capture');
-
-      // Wait a bit more to ensure video stream is stable before allowing capture
-      setTimeout(() => {
-        console.log('Camera is now stable and ready for capture');
-        this.snackBar.open('Camera ready for capture!', 'Close', { duration: 2000 });
-      }, 2000);
-
-    } catch (error) {
-      console.error('Error accessing camera:', error);
-      this.cameraActive = false;
-
-      // Provide more specific error messages
-      if (error instanceof DOMException) {
-        switch (error.name) {
-          case 'NotAllowedError':
-            this.snackBar.open('Camera access denied. Please allow camera permissions.', 'Close', {
-              duration: 5000
-            });
-            break;
-          case 'NotFoundError':
-            this.snackBar.open('No camera found. Please connect a camera.', 'Close', {
-              duration: 5000
-            });
-            break;
-          case 'NotReadableError':
-            this.snackBar.open('Camera is already in use by another application.', 'Close', {
-              duration: 5000
-            });
-            break;
-          default:
-            this.snackBar.open('Error accessing camera: ' + error.message, 'Close', {
-              duration: 5000
-            });
-        }
-      } else {
-        this.snackBar.open('Error accessing camera. Please check permissions.', 'Close', {
-          duration: 5000
-        });
-      }
-    }
-  }
-
-  stopCamera() {
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
-      this.mediaStream = null;
-    }
-    this.cameraActive = false;
-    console.log('Camera stopped');
-  }
-
-  // Method to restart camera (useful when video stream gets corrupted)
-  restartCamera() {
-    console.log('Restarting camera...');
-    this.stopCamera();
-    setTimeout(() => {
-      this.safeStartCamera();
-    }, 1000); // Wait 1 second before restarting
-  }
-
-  // Check if video stream is healthy
-  checkVideoHealth(): boolean {
-    if (!this.videoElement || !this.videoElement.nativeElement) {
-      return false;
-    }
-
-    const video = this.videoElement.nativeElement;
-    const isHealthy = video.videoWidth > 0 &&
-                     video.videoHeight > 0 &&
-                     video.readyState >= 3 &&
-                     !video.paused &&
-                     !video.ended &&
-                     video.srcObject !== null;
-
-    console.log('Video health check:', {
-      videoWidth: video.videoWidth,
-      videoHeight: video.videoHeight,
-      readyState: video.readyState,
-      paused: video.paused,
-      ended: video.ended,
-      hasSrcObject: !!video.srcObject,
-      isHealthy: isHealthy
-    });
-
-    return isHealthy;
-  }
-
-  captureAndDetect() {
-    if (!this.cameraActive) {
-      console.warn('Camera is not active');
-      return;
-    }
-
-    // Check if video and canvas elements are available
-    if (!this.videoElement || !this.videoElement.nativeElement) {
-      console.error('Video element not available');
-      this.snackBar.open('Camera not properly initialized.', 'Close', { duration: 3000 });
-      return;
-    }
-
-    if (!this.canvasElement || !this.canvasElement.nativeElement) {
-      console.error('Canvas element not available');
-      this.snackBar.open('Canvas not properly initialized.', 'Close', { duration: 3000 });
-      return;
-    }
-
-    // Check video stream health before capture
-    if (!this.checkVideoHealth()) {
-      console.error('Video stream is not healthy');
-      this.snackBar.open('Video stream issue detected. Try restarting the camera.', 'Close', { duration: 5000 });
-      return;
-    }
-
-    this.isProcessing = true;
-    const video = this.videoElement.nativeElement;
-    const canvas = this.canvasElement.nativeElement;
-    const context = canvas.getContext('2d');
-
-    if (context) {
-      try {
-        // Validate video element state before capturing
-        console.log('Video element state before capture:', {
-          videoWidth: video.videoWidth,
-          videoHeight: video.videoHeight,
-          readyState: video.readyState,
-          currentTime: video.currentTime,
-          paused: video.paused,
-          ended: video.ended,
-          srcObject: !!video.srcObject
-        });
-
-        // Check if video has valid dimensions
-        if (video.videoWidth === 0 || video.videoHeight === 0) {
-          console.error('Video has no dimensions - video not loaded properly');
-          this.isProcessing = false;
-          this.snackBar.open('Video not loaded properly. Please restart camera.', 'Close', { duration: 3000 });
-          return;
-        }
-
-        // Check if video is ready (must have current data)
-        if (video.readyState < 3) { // HAVE_FUTURE_DATA - more strict check
-          console.error('Video not ready for capture, readyState:', video.readyState);
-          this.isProcessing = false;
-          this.snackBar.open('Video not ready. Please wait and try again.', 'Close', { duration: 3000 });
-          return;
-        }
-
-        // Wait a moment to ensure video frame is stable
-        setTimeout(() => {
-          this.performCapture(video, canvas, context);
-        }, 500); // Increased delay to ensure video is stable
-
-      } catch (error) {
-        console.error('Error in capture preparation:', error);
-        this.isProcessing = false;
-        this.snackBar.open('Error preparing capture.', 'Close', { duration: 3000 });
-      }
-    } else {
-      console.error('Canvas context not available');
-      this.isProcessing = false;
-      this.snackBar.open('Canvas not properly initialized.', 'Close', { duration: 3000 });
-    }
-  }
-
-  private performCapture(video: HTMLVideoElement, canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) {
-    try {
-      // Use actual video dimensions for better quality
-      const captureWidth = video.videoWidth || 640;
-      const captureHeight = video.videoHeight || 480;
-
-      console.log('Performing capture with dimensions:', captureWidth, 'x', captureHeight);
-      console.log('Video state during capture:', {
-        videoWidth: video.videoWidth,
-        videoHeight: video.videoHeight,
-        readyState: video.readyState,
-        currentTime: video.currentTime,
-        paused: video.paused,
-        ended: video.ended
-      });
-
-      // Wait for next animation frame to ensure video is rendered
-      requestAnimationFrame(() => {
-        try {
-          // Set canvas to high resolution
-          canvas.width = captureWidth;
-          canvas.height = captureHeight;
-
-          // Set high-quality rendering
-          context.imageSmoothingEnabled = true;
-          context.imageSmoothingQuality = 'high';
-
-          // Clear canvas with white background (helps detect if capture fails)
-          context.fillStyle = 'white';
-          context.fillRect(0, 0, captureWidth, captureHeight);
-
-          // Draw the video frame to canvas
-          context.drawImage(video, 0, 0, captureWidth, captureHeight);
-
-          // Check if the canvas actually has image data (not just white)
-          const imageData = context.getImageData(0, 0, Math.min(50, captureWidth), Math.min(50, captureHeight));
-          const hasImageData = this.checkImageData(imageData);
-
-          console.log('Image content check result:', hasImageData);
-
-          if (!hasImageData) {
-            console.error('Canvas appears to be empty or white after drawing video');
-            console.log('Trying alternative capture method...');
-            this.tryAlternativeCapture(video, canvas, context);
-            return;
-          }
-
-          // Convert to blob with maximum quality
-          canvas.toBlob((blob) => {
-            if (blob) {
-              console.log('Image blob created successfully:', {
-                size: blob.size,
-                type: blob.type,
-                sizeKB: Math.round(blob.size / 1024)
-              });
-
-              if (blob.size < 10000) { // Less than 10KB is suspicious
-                console.warn('Image blob is very small (', blob.size, 'bytes), trying alternative method');
-                this.tryAlternativeCapture(video, canvas, context);
-                return;
-              }
-
-              this.processDetection(blob);
-            } else {
-              console.error('Failed to create image blob from canvas');
-              this.tryAlternativeCapture(video, canvas, context);
-            }
-          }, 'image/jpeg', 0.95); // Very high quality
-
-        } catch (drawError) {
-          console.error('Error drawing to canvas:', drawError);
-          this.tryAlternativeCapture(video, canvas, context);
-        }
-      });
-
-    } catch (error) {
-      console.error('Error in performCapture:', error);
-      this.isProcessing = false;
-      this.snackBar.open('Error capturing image.', 'Close', { duration: 3000 });
-    }
-  }
-
-  private tryAlternativeCapture(video: HTMLVideoElement, canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) {
-    console.log('Attempting alternative capture method...');
-
-    try {
-      // Create a new temporary canvas
-      const tempCanvas = document.createElement('canvas');
-      const tempContext = tempCanvas.getContext('2d');
-
-      if (!tempContext) {
-        this.isProcessing = false;
-        this.snackBar.open('Failed to create canvas context.', 'Close', { duration: 3000 });
-        return;
-      }
-
-      const captureWidth = video.videoWidth || 640;
-      const captureHeight = video.videoHeight || 480;
-
-      tempCanvas.width = captureWidth;
-      tempCanvas.height = captureHeight;
-
-      // Try without clearing canvas first
-      tempContext.drawImage(video, 0, 0, captureWidth, captureHeight);
-
-      // Convert to blob
-      tempCanvas.toBlob((blob) => {
-        if (blob && blob.size > 5000) {
-          console.log('Alternative capture successful:', {
-            size: blob.size,
-            sizeKB: Math.round(blob.size / 1024)
-          });
-
-          // Copy to main canvas for display
-          canvas.width = captureWidth;
-          canvas.height = captureHeight;
-          context.clearRect(0, 0, captureWidth, captureHeight);
-          context.drawImage(tempCanvas, 0, 0);
-
-          this.processDetection(blob);
-        } else {
-          console.error('Alternative capture also failed');
-          this.isProcessing = false;
-          this.snackBar.open('Failed to capture image. Please restart camera and try again.', 'Close', { duration: 5000 });
-        }
-      }, 'image/jpeg', 0.95);
-
-    } catch (error) {
-      console.error('Alternative capture error:', error);
-      this.isProcessing = false;
-      this.snackBar.open('Image capture failed. Please restart camera.', 'Close', { duration: 5000 });
-    }
-  }
-
-  private checkImageData(imageData: ImageData): boolean {
-    const data = imageData.data;
-    let nonWhitePixels = 0;
-
-    // Check if there are non-white pixels (indicating actual image content)
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-
-      // If pixel is not white or very close to white
-      if (r < 250 || g < 250 || b < 250) {
-        nonWhitePixels++;
-      }
-    }
-
-    const totalPixels = data.length / 4;
-    const nonWhitePercentage = (nonWhitePixels / totalPixels) * 100;
-
-    console.log('Image data check:', {
-      totalPixels,
-      nonWhitePixels,
-      nonWhitePercentage: nonWhitePercentage.toFixed(2) + '%'
-    });
-
-    // If more than 5% of pixels are non-white, we likely have image content
-    return nonWhitePercentage > 5;
-  }
-
-  processDetection(imageBlob: Blob) {
-    const formData = new FormData();
-    formData.append('image', imageBlob, 'capture.jpg');
-    
-    if (this.currentLocation) {
-      formData.append('latitude', this.currentLocation.latitude.toString());
-      formData.append('longitude', this.currentLocation.longitude.toString());
-    }
-    
-    if (this.cameraId) {
-      formData.append('cameraId', this.cameraId);
-    }
-    
-    formData.append('cameraType', this.cameraType);
-    
-    if (this.locationAddress) {
-      formData.append('locationAddress', this.locationAddress);
-    }
-
-    this.apiService.detectFace(formData).subscribe({
-      next: (response) => {
-        this.isProcessing = false;
-        this.lastDetectionResult = response;
-        
-        if (response.matched) {
-          this.snackBar.open(
-            `Person identified: ${response.person?.firstName} ${response.person?.lastName}`, 
-            'Close', 
-            { duration: 5000, panelClass: ['success-snackbar'] }
-          );
-        } else {
-          this.snackBar.open('Face detected but no match found in database', 'Close', {
-            duration: 3000,
-            panelClass: ['warning-snackbar']
-          });
-        }
-      },
-      error: (error) => {
-        this.isProcessing = false;
-        const errorMessage = error.error?.message || 'Face detection failed. Please try again.';
-        this.snackBar.open(errorMessage, 'Close', {
-          duration: 5000,
-          panelClass: ['error-snackbar']
-        });
-      }
-    });
-  }
-
-  getCurrentLocation() {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          this.currentLocation = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy
-          };
-          this.getAddressFromCoordinates();
-        },
-        (error) => {
-          console.warn('Geolocation error:', error);
-          this.snackBar.open('Location access denied. Manual location entry may be required.', 'Close', {
-            duration: 3000
-          });
-        }
-      );
-    }
-  }
-
-  getAddressFromCoordinates() {
-    if (!this.currentLocation) return;
-    
-    // In a real application, you would use a geocoding service here
-    // For demo purposes, we'll create a simple address format
-    this.locationAddress = `Lat: ${this.currentLocation.latitude.toFixed(6)}, Lng: ${this.currentLocation.longitude.toFixed(6)}`;
   }
 }

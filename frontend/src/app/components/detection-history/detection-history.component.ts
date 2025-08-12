@@ -5,6 +5,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatTableModule } from '@angular/material/table';
 import { MatSnackBarModule, MatSnackBar } from '@angular/material/snack-bar';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { ApiService } from '../../services/api.service';
 import { DetectionLog } from '../../models/detection.model';
 
@@ -17,7 +18,8 @@ import { DetectionLog } from '../../models/detection.model';
     MatButtonModule,
     MatIconModule,
     MatTableModule,
-    MatSnackBarModule
+    MatSnackBarModule,
+    MatTooltipModule
   ],
   template: `
     <div class="container">
@@ -155,7 +157,7 @@ import { DetectionLog } from '../../models/detection.model';
               <ng-container matColumnDef="actions">
                 <th mat-header-cell *matHeaderCellDef>Actions</th>
                 <td mat-cell *matCellDef="let detection">
-                  <button mat-icon-button color="primary" (click)="viewDetails(detection)" matTooltip="View Details">
+                  <button mat-icon-button color="primary" (click)="viewDetails(detection)" matTooltip="View Detection Details">
                     <mat-icon>visibility</mat-icon>
                   </button>
                   <button mat-icon-button color="accent" 

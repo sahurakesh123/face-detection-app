@@ -22,12 +22,11 @@ public class PersonMapper {
         
         PersonSummaryDTO dto = new PersonSummaryDTO();
         dto.setId(person.getId());
-        dto.setFirstName(person.getFirstName());
-        dto.setLastName(person.getLastName());
+        dto.setName(person.getName());
         dto.setEmail(person.getEmail());
         dto.setPhoneNumber(person.getPhoneNumber());
         dto.setRegistrationDate(person.getRegistrationDate());
-        dto.setIsActive(person.getIsActive());
+        dto.setIsActive(person.isActive());
         
         return dto;
     }
@@ -39,14 +38,13 @@ public class PersonMapper {
         
         PersonDTO dto = new PersonDTO();
         dto.setId(person.getId());
-        dto.setFirstName(person.getFirstName());
-        dto.setLastName(person.getLastName());
+        dto.setName(person.getName());
         dto.setEmail(person.getEmail());
         dto.setPhoneNumber(person.getPhoneNumber());
         dto.setAddress(person.getAddress());
         dto.setDateOfBirth(person.getDateOfBirth());
         dto.setRegistrationDate(person.getRegistrationDate());
-        dto.setIsActive(person.getIsActive());
+        dto.setIsActive(person.isActive());
         
         // Convert collections without circular references
         if (person.getFaceDataList() != null) {
