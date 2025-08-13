@@ -23,7 +23,8 @@ public class PersonService {
     private final FaceRecognitionService faceRecognitionService;
     
     @Transactional
-    public Person registerPerson(String name, String email, String base64Image) {
+    public Person registerPerson(String name, String email, String phoneNumber, String address, String base64Image) {
+        log.info("Registering new person: {}, {}", name, email);
         // Basic validation
         if (name == null || name.trim().isEmpty() || email == null || email.trim().isEmpty() || base64Image == null || base64Image.isEmpty()) {
             throw new IllegalArgumentException("Name, email, and image data are required.");
@@ -32,17 +33,42 @@ public class PersonService {
         Person newPerson = new Person();
         newPerson.setName(name);
         newPerson.setEmail(email);
+        newPerson.setPhoneNumber(phoneNumber);
+        newPerson.setAddress(address);
         newPerson.setActive(true);
         newPerson.setRegistrationDate(LocalDateTime.now());
 
         // Save person to get an ID
         Person savedPerson = personRepository.save(newPerson);
+        log.debug("Person saved with ID: {}", savedPerson.getId());
 
-        // Save the face data
-        FaceData faceData = new FaceData();
-        faceData.setPerson(savedPerson);
-        faceData.setBase64ImageData(base64Image);
-        faceDataRepository.save(faceData);
+        try {
+            // Save the image and extract face encoding
+            String imagePath = faceRecognitionService.saveImageFromBase64(base64Image, "person_" + savedPerson.getId());
+            log.debug("Face image saved to: {}", imagePath);
+            
+            // Extract face encoding
+            String faceEncoding = faceRecognitionService.extractFaceEncoding(imagePath);
+            if (faceEncoding == null) {
+                log.warn("Could not extract face encoding from image for person ID: {}", savedPerson.getId());
+                throw new IllegalArgumentException("Could not detect a face in the provided image. Please try again with a clearer face image.");
+            }
+            
+            log.debug("Face encoding extracted successfully, length: {}", faceEncoding.length());
+
+            // Save the face data with encoding
+            FaceData faceData = new FaceData();
+            faceData.setPerson(savedPerson);
+            faceData.setBase64ImageData(base64Image);
+            faceData.setFaceEncoding(faceEncoding);
+            faceData.setIsActive(true); // Fix: Use setIsActive instead of setActive
+            faceDataRepository.save(faceData);
+            log.info("Face data saved successfully for person ID: {}", savedPerson.getId());
+            
+        } catch (Exception e) {
+            log.error("Error processing face image during registration", e);
+            throw new RuntimeException("Error processing face image: " + e.getMessage(), e);
+        }
 
         return savedPerson;
     }

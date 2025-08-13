@@ -3,8 +3,10 @@ package com.facerecognition.controller;
 import com.facerecognition.dto.DetectionRequest;
 import com.facerecognition.dto.PersonRegistrationRequest;
 import com.facerecognition.model.DetectionLog;
+import com.facerecognition.model.FaceData;
 import com.facerecognition.model.Person;
 import com.facerecognition.service.DetectionService;
+import com.facerecognition.service.FaceRecognitionService;
 import com.facerecognition.service.PersonService;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Builder;
@@ -21,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -34,6 +37,7 @@ public class FaceRecognitionController {
     
     private final PersonService personService;
     private final DetectionService detectionService;
+    private final FaceRecognitionService faceRecognitionService; // Added FaceRecognitionService
     
     // DTO for the detection response
     @Data
@@ -49,7 +53,8 @@ public class FaceRecognitionController {
     @PostMapping("/persons/register")
     public ResponseEntity<?> registerPerson(@RequestBody PersonRegistrationRequest request) {
         try {
-            Person registeredPerson = personService.registerPerson(request.getName(), request.getEmail(), request.getBase64Image());
+            Person registeredPerson = personService.registerPerson(request.getName(), request.getEmail(), 
+                request.getPhoneNumber(), request.getAddress(), request.getBase64Image());
             return ResponseEntity.ok(registeredPerson);
         } catch (Exception e) {
             log.error("Error during person registration", e);
@@ -157,6 +162,73 @@ public class FaceRecognitionController {
         } catch (IOException e) {
             log.error("Error in test upload", e);
             return ResponseEntity.badRequest().body("Error: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Test endpoint for debugging confidence score calculation
+     */
+    @GetMapping("/face/test-confidence")
+    public ResponseEntity<?> testConfidenceScore() {
+        try {
+            log.info("Starting confidence score test");
+            Map<String, Object> result = new HashMap<>();
+            
+            // Get all registered persons
+            List<Person> persons = personService.getAllActivePersons();
+            if (persons.isEmpty()) {
+                return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "message", "No registered persons found"
+                ));
+            }
+            
+            // Get the first person with face data
+            Person testPerson = persons.get(0);
+            List<FaceData> faceDataList = faceRecognitionService.getFaceDataForPerson(testPerson);
+            
+            if (faceDataList.isEmpty()) {
+                return ResponseEntity.ok(Map.of(
+                    "success", false,
+                    "message", "No face data found for person: " + testPerson.getName()
+                ));
+            }
+            
+            // Get the first face data
+            FaceData faceData = faceDataList.get(0);
+            String storedImagePath = faceData.getImagePath();
+            String storedEncoding = faceData.getFaceEncoding();
+            
+            // Extract encoding from the same image again
+            String freshEncoding = faceRecognitionService.extractFaceEncoding(storedImagePath);
+            
+            // Calculate similarity between stored and fresh encoding (should be very high)
+            double selfSimilarity = faceRecognitionService.calculateSimilarity(storedEncoding, freshEncoding);
+            
+            // Get best match confidence using the fresh encoding
+            double bestMatchConfidence = faceRecognitionService.getBestMatchConfidence(freshEncoding);
+            
+            // Get detailed calculation info
+            String calculationDetails = faceRecognitionService.getConfidenceScoreCalculationDetails(freshEncoding);
+            
+            result.put("success", true);
+            result.put("personName", testPerson.getName());
+            result.put("personId", testPerson.getId());
+            result.put("storedImagePath", storedImagePath);
+            result.put("storedEncodingLength", storedEncoding != null ? storedEncoding.length() : 0);
+            result.put("freshEncodingLength", freshEncoding != null ? freshEncoding.length() : 0);
+            result.put("selfSimilarity", selfSimilarity);
+            result.put("bestMatchConfidence", bestMatchConfidence);
+            result.put("calculationDetails", calculationDetails);
+            
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            log.error("Error in confidence score test", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                "success", false,
+                "message", "Error: " + e.getMessage()
+            ));
         }
     }
 }

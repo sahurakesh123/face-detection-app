@@ -7,4 +7,6 @@ public class PersonRegistrationRequest {
     private String name;
     private String email;
     private String base64Image;
+    private String phoneNumber;
+    private String address;
 }
